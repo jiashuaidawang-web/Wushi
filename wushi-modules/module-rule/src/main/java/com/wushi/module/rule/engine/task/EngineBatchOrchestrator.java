@@ -1,10 +1,12 @@
 package com.wushi.module.rule.engine.task;
 
 import com.wushi.common.enums.BatchStatus;
+import com.wushi.common.enums.EngineType;
 import com.wushi.common.enums.StepStatus;
 import com.wushi.module.rule.engine.core.EngineRunContext;
 import com.wushi.module.rule.engine.core.EngineStepResult;
 import com.wushi.module.rule.service.EngineBatchLogService;
+import com.wushi.module.rule.service.RuleConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -21,9 +23,11 @@ public class EngineBatchOrchestrator {
 
     private final List<EngineTask> tasks;
     private final EngineBatchLogService batchLogService;
+    private final RuleConfigService ruleConfigService;
 
     public List<EngineStepResult> run(EngineRunContext context) {
         context.ensureBatchId();
+        resolveRuleConfigs(context);
         batchLogService.startRun(context);
 
         List<EngineTask> orderedTasks = tasks.stream()
@@ -79,6 +83,13 @@ public class EngineBatchOrchestrator {
             if (!taskMap.containsKey(dependency)) {
                 throw new IllegalStateException("Unknown dependency " + dependency + " for task " + task.stepName());
             }
+        }
+    }
+
+    private void resolveRuleConfigs(EngineRunContext context) {
+        Map<EngineType, com.wushi.module.rule.model.ResolvedRuleConfig> ruleConfigs = context.getOrCreateRuleConfigs();
+        for (EngineType engineType : EngineType.values()) {
+            ruleConfigs.computeIfAbsent(engineType, key -> ruleConfigService.resolve(key, context.getRuleVersion()));
         }
     }
 }
