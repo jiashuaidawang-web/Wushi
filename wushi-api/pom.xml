@@ -12,6 +12,11 @@
     <dependencies>
         <dependency>
             <groupId>com.wushi</groupId>
+            <artifactId>module-emotion</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.wushi</groupId>
             <artifactId>module-agent-audit</artifactId>
             <version>${project.version}</version>
         </dependency>
