@@ -1,0 +1,13 @@
+package com.wushi.common.enums;
+
+public enum EmotionCycleStage {
+    PANIC_ICE_POINT,
+    WEAK_REPAIR,
+    PROFIT_EFFECT_SPREAD,
+    MAINLINE_FERMENT,
+    CLIMAX_CONSENSUS,
+    HIGH_POSITION_DIVERGENCE,
+    LOSS_EFFECT_SPREAD,
+    RECESSION_KILL,
+    UNKNOWN
+}
