@@ -13,8 +13,13 @@ public class FactorResult {
     private String factorCode;
     private String factorName;
     private BigDecimal factorValue;
+    private BigDecimal thresholdValue;
+    private String thresholdOperator;
+    private Boolean thresholdPassed;
     private BigDecimal score;
     private BigDecimal weight;
     private EvidenceType evidenceType;
+    private String sourceTable;
+    private String sourceKey;
     private String description;
 }
