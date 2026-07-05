@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.wushi</groupId>
+        <artifactId>wushi</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>wushi-modules</artifactId>
+    <packaging>pom</packaging>
+    <modules>
+        <module>module-market</module>
+        <module>module-spider</module>
+        <module>module-rule</module>
+        <module>module-emotion</module>
+        <module>module-mainline</module>
+        <module>module-leader</module>
+        <module>module-pattern</module>
+        <module>module-risk</module>
+        <module>module-similarity</module>
+        <module>module-review</module>
+        <module>module-sample</module>
+        <module>module-backtest</module>
+        <module>module-agent-audit</module>
+    </modules>
+</project>

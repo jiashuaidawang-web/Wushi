@@ -1,0 +1,29 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: wushi
+  datasource:
+    mysql:
+      jdbc-url: jdbc:mysql://localhost:3306/wushi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      username: root
+      password: root
+      driver-class-name: com.mysql.cj.jdbc.Driver
+    clickhouse:
+      jdbc-url: jdbc:clickhouse://localhost:8123/wushi
+      username: default
+      password:
+      driver-class-name: com.clickhouse.jdbc.ClickHouseDriver
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+wushi:
+  engine:
+    default-rule-version: v0.1.0
+  selenium:
+    remote-url: http://localhost:4444/wd/hub

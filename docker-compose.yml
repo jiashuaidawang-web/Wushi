@@ -1,0 +1,37 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: wushi-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: wushi
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - wushi-mysql:/var/lib/mysql
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: wushi-clickhouse
+    environment:
+      CLICKHOUSE_DB: wushi
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD:
+      TZ: Asia/Shanghai
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - wushi-clickhouse:/var/lib/clickhouse
+
+  selenium:
+    image: selenium/standalone-chrome:4.27.0
+    container_name: wushi-selenium
+    shm_size: 2gb
+    ports:
+      - "4444:4444"
+
+volumes:
+  wushi-mysql:
+  wushi-clickhouse:
