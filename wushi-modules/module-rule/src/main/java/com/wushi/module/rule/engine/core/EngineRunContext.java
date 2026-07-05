@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.util.UUID;
 
 @Data
 @Builder
@@ -17,4 +18,10 @@ public class EngineRunContext {
     private JudgementMode judgementMode;
     private RunMode runMode;
     private String ruleVersion;
+
+    public void ensureBatchId() {
+        if (batchId == null || batchId.isBlank()) {
+            batchId = "BATCH-" + UUID.randomUUID();
+        }
+    }
 }

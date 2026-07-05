@@ -11,6 +11,7 @@ public class EngineStepResult {
     private boolean success;
     private long affectedRows;
     private String message;
+    private boolean shouldContinue;
 
     public static EngineStepResult success(String stepName, long affectedRows) {
         return EngineStepResult.builder()
@@ -18,6 +19,7 @@ public class EngineStepResult {
                 .success(true)
                 .affectedRows(affectedRows)
                 .message("success")
+                .shouldContinue(true)
                 .build();
     }
 
@@ -27,6 +29,7 @@ public class EngineStepResult {
                 .success(false)
                 .affectedRows(0)
                 .message(message)
+                .shouldContinue(false)
                 .build();
     }
 }

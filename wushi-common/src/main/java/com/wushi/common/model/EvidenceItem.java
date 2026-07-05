@@ -18,4 +18,6 @@ public class EvidenceItem {
     private BigDecimal weight;
     private String sourceTable;
     private String sourceKey;
+    private String ruleVersion;
+    private String validationStatus;
 }

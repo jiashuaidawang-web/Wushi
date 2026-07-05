@@ -22,10 +22,12 @@ public class JudgementResult<T> {
     private EngineType engineType;
     private TargetType targetType;
     private String targetCode;
+    private String targetName;
     private String conclusion;
     private BigDecimal confidence;
     private String ruleVersion;
     private DataQualityLevel dataQualityLevel;
+    private DataQualityContext dataQualityContext;
     private T detail;
     private List<EvidenceItem> evidenceList;
     private List<EvidenceItem> conflictList;

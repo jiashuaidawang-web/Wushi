@@ -1,0 +1,9 @@
+package com.wushi.module.rule.mapper;
+
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.wushi.module.rule.domain.entity.EngineBatchStepLogEntity;
+import org.apache.ibatis.annotations.Mapper;
+
+@Mapper
+public interface EngineBatchStepLogMapper extends BaseMapper<EngineBatchStepLogEntity> {
+}

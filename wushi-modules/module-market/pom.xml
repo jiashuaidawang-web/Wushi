@@ -7,5 +7,6 @@
     <artifactId>module-market</artifactId>
     <dependencies>
         <dependency><groupId>com.wushi</groupId><artifactId>wushi-infrastructure</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>org.projectlombok</groupId><artifactId>lombok</artifactId><optional>true</optional></dependency>
     </dependencies>
 </project>
