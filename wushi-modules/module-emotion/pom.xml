@@ -7,5 +7,6 @@
     <artifactId>module-emotion</artifactId>
     <dependencies>
         <dependency><groupId>com.wushi</groupId><artifactId>module-rule</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>com.wushi</groupId><artifactId>module-market</artifactId><version>${project.version}</version></dependency>
     </dependencies>
 </project>

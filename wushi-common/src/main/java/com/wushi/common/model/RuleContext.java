@@ -18,6 +18,7 @@ public class RuleContext {
     private Map<String, BigDecimal> thresholdValues;
     private Map<String, String> thresholdOperators;
     private Map<String, String> evidenceTypes;
+    private Map<String, String> factorDirections;
     private List<String> combinationCodes;
     private Map<String, Object> parameters;
 }

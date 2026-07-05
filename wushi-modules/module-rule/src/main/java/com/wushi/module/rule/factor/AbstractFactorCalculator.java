@@ -38,7 +38,8 @@ public abstract class AbstractFactorCalculator implements FactorCalculator {
         BigDecimal weight = ruleContext == null ? null : getDecimal(ruleContext.getFactorWeights(), factorCode);
         boolean thresholdPassed = thresholdMatcher.matches(factorValue, thresholdValue, thresholdOperator);
         EvidenceType configuredType = resolveEvidenceType(ruleContext == null ? null : getString(ruleContext.getEvidenceTypes(), factorCode));
-        EvidenceType evidenceType = thresholdPassed ? configuredType : downgradeEvidenceType(configuredType);
+        String factorDirection = ruleContext == null ? null : getString(ruleContext.getFactorDirections(), factorCode);
+        EvidenceType evidenceType = resolveFinalEvidenceType(configuredType, factorDirection, thresholdOperator, thresholdPassed);
 
         return FactorResult.builder()
                 .factorCode(factorCode)
@@ -114,6 +115,21 @@ public abstract class AbstractFactorCalculator implements FactorCalculator {
             return EvidenceType.SUPPORT;
         }
         return EvidenceType.valueOf(evidenceType);
+    }
+
+    private EvidenceType resolveFinalEvidenceType(EvidenceType configuredType, String factorDirection, String thresholdOperator, boolean thresholdPassed) {
+        if ("NEGATIVE".equals(factorDirection)) {
+            return resolveNegativeEvidenceType(configuredType, thresholdOperator, thresholdPassed);
+        }
+        return thresholdPassed ? configuredType : downgradeEvidenceType(configuredType);
+    }
+
+    private EvidenceType resolveNegativeEvidenceType(EvidenceType configuredType, String thresholdOperator, boolean thresholdPassed) {
+        boolean acceptableWhenPassed = "LTE".equals(thresholdOperator) || "LT".equals(thresholdOperator);
+        if (acceptableWhenPassed) {
+            return thresholdPassed ? EvidenceType.SUPPORT : configuredType;
+        }
+        return thresholdPassed ? configuredType : EvidenceType.SUPPORT;
     }
 
     private EvidenceType downgradeEvidenceType(EvidenceType configuredType) {

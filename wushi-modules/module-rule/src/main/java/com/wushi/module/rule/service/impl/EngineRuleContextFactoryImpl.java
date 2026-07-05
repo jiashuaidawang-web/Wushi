@@ -3,6 +3,7 @@ package com.wushi.module.rule.service.impl;
 import com.wushi.common.enums.EngineType;
 import com.wushi.common.model.RuleContext;
 import com.wushi.module.rule.domain.entity.FactorCombinationDefinitionEntity;
+import com.wushi.module.rule.domain.entity.FactorDefinitionEntity;
 import com.wushi.module.rule.domain.entity.RuleFactorWeightEntity;
 import com.wushi.module.rule.model.ResolvedRuleConfig;
 import com.wushi.module.rule.service.EngineRuleContextFactory;
@@ -32,12 +33,16 @@ public class EngineRuleContextFactoryImpl implements EngineRuleContextFactory {
         Map<String, BigDecimal> thresholdValues = new HashMap<>();
         Map<String, String> thresholdOperators = new HashMap<>();
         Map<String, String> evidenceTypes = new HashMap<>();
+        Map<String, String> factorDirections = new HashMap<>();
 
         for (RuleFactorWeightEntity weight : resolvedRuleConfig.getFactorWeights()) {
             factorWeights.put(weight.getFactorCode(), weight.getWeight());
             thresholdValues.put(weight.getFactorCode(), weight.getThresholdValue());
             thresholdOperators.put(weight.getFactorCode(), weight.getThresholdOperator());
             evidenceTypes.put(weight.getFactorCode(), weight.getEvidenceType());
+        }
+        for (FactorDefinitionEntity factor : resolvedRuleConfig.getFactors()) {
+            factorDirections.put(factor.getFactorCode(), factor.getFactorDirection());
         }
 
         return RuleContext.builder()
@@ -47,6 +52,7 @@ public class EngineRuleContextFactoryImpl implements EngineRuleContextFactory {
                 .thresholdValues(thresholdValues)
                 .thresholdOperators(thresholdOperators)
                 .evidenceTypes(evidenceTypes)
+                .factorDirections(factorDirections)
                 .combinationCodes(resolvedRuleConfig.getCombinations().stream()
                         .map(FactorCombinationDefinitionEntity::getCombinationCode)
                         .toList())
