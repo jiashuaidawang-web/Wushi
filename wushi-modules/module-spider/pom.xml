@@ -9,5 +9,6 @@
         <dependency><groupId>com.wushi</groupId><artifactId>module-market</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>org.seleniumhq.selenium</groupId><artifactId>selenium-java</artifactId></dependency>
         <dependency><groupId>org.apache.commons</groupId><artifactId>commons-pool2</artifactId></dependency>
+        <dependency><groupId>org.projectlombok</groupId><artifactId>lombok</artifactId><optional>true</optional></dependency>
     </dependencies>
 </project>
