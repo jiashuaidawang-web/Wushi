@@ -17,8 +17,23 @@
         </dependency>
         <dependency>
             <groupId>com.wushi</groupId>
+            <artifactId>module-mainline</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.wushi</groupId>
+            <artifactId>module-rule</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.wushi</groupId>
             <artifactId>module-agent-audit</artifactId>
             <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

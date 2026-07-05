@@ -8,5 +8,6 @@
     <dependencies>
         <dependency><groupId>com.wushi</groupId><artifactId>module-rule</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>com.wushi</groupId><artifactId>module-market</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>org.projectlombok</groupId><artifactId>lombok</artifactId><optional>true</optional></dependency>
     </dependencies>
 </project>
