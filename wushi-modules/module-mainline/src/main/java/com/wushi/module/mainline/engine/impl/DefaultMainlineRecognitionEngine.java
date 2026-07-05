@@ -53,7 +53,7 @@ public class DefaultMainlineRecognitionEngine implements MainlineRecognitionEngi
                 .targetType(defaultTargetType(request.targetType()))
                 .targetCode(plateCode)
                 .targetName(plateName)
-                .conclusion(decision.conclusion())
+                .conclusion(enrichConclusion(decision.conclusion(), request))
                 .confidence(decision.confidence())
                 .ruleVersion(request.ruleVersion())
                 .dataQualityContext(request.dataQualityContext())
@@ -61,6 +61,9 @@ public class DefaultMainlineRecognitionEngine implements MainlineRecognitionEngi
                         plateCode,
                         plateName,
                         stringParam(request, "plateType", null),
+                        intParam(request, "candidateRank"),
+                        decimalParam(request, "candidateScore"),
+                        stringParam(request, "candidateReason", null),
                         decision.mainlineStatus(),
                         value(factorResult.getFactorResults(), "MAINLINE_LIMIT_UP_COUNT"),
                         value(factorResult.getFactorResults(), "MAINLINE_ACTIVE_DAYS"),
@@ -276,11 +279,55 @@ public class DefaultMainlineRecognitionEngine implements MainlineRecognitionEngi
         return value == null || value.isBlank() ? defaultValue : value;
     }
 
+    private String enrichConclusion(String conclusion, EngineRequest request) {
+        Integer rank = intParam(request, "candidateRank");
+        String reason = stringParam(request, "candidateReason", null);
+        if (rank == null && (reason == null || reason.isBlank())) {
+            return conclusion;
+        }
+        String rankText = rank == null ? "候选排序未定" : "候选排名第" + rank;
+        String reasonText = reason == null || reason.isBlank() ? "" : "；" + reason;
+        return conclusion + "（" + rankText + reasonText + "）";
+    }
+
     private String stringParam(EngineRequest request, String key, String defaultValue) {
         if (request.params() == null || request.params().get(key) == null) {
             return defaultValue;
         }
         return String.valueOf(request.params().get(key));
+    }
+
+    private Integer intParam(EngineRequest request, String key) {
+        if (request.params() == null || request.params().get(key) == null) {
+            return null;
+        }
+        Object value = request.params().get(key);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        String text = String.valueOf(value).trim();
+        if (text.isEmpty()) {
+            return null;
+        }
+        return Integer.valueOf(text);
+    }
+
+    private BigDecimal decimalParam(EngineRequest request, String key) {
+        if (request.params() == null || request.params().get(key) == null) {
+            return null;
+        }
+        Object value = request.params().get(key);
+        if (value instanceof BigDecimal decimal) {
+            return decimal;
+        }
+        if (value instanceof Number number) {
+            return BigDecimal.valueOf(number.doubleValue()).setScale(4, RoundingMode.HALF_UP);
+        }
+        String text = String.valueOf(value).trim();
+        if (text.isEmpty()) {
+            return null;
+        }
+        return new BigDecimal(text).setScale(4, RoundingMode.HALF_UP);
     }
 
     private record MainlineDecision(

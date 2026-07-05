@@ -2,6 +2,7 @@ package com.wushi.api.controller;
 
 import com.wushi.api.assembler.JudgmentBlockAssembler;
 import com.wushi.api.vo.common.DataQualityIssueVO;
+import com.wushi.api.vo.common.JudgmentBlockVO;
 import com.wushi.api.vo.common.MarketQuery;
 import com.wushi.api.vo.common.NextWatchItemVO;
 import com.wushi.api.vo.page.MarketOverviewVO;
@@ -11,6 +12,9 @@ import com.wushi.common.enums.JudgementMode;
 import com.wushi.common.enums.TargetType;
 import com.wushi.module.emotion.engine.CycleRecognitionEngine;
 import com.wushi.module.mainline.engine.MainlineRecognitionEngine;
+import com.wushi.module.mainline.model.MainlineCandidate;
+import com.wushi.module.mainline.model.MainlineJudgementDetail;
+import com.wushi.module.mainline.service.MainlineCandidateSelector;
 import com.wushi.module.rule.engine.core.EngineRequest;
 import com.wushi.module.rule.support.EngineRequestFactory;
 import lombok.RequiredArgsConstructor;
@@ -43,6 +47,7 @@ public class MarketOverviewController {
     private final EngineRequestFactory engineRequestFactory;
     private final CycleRecognitionEngine cycleRecognitionEngine;
     private final MainlineRecognitionEngine mainlineRecognitionEngine;
+    private final MainlineCandidateSelector mainlineCandidateSelector;
     private final JudgmentBlockAssembler judgmentBlockAssembler;
 
     @GetMapping("/overview")
@@ -67,28 +72,18 @@ public class MarketOverviewController {
         var cycleJudgement = cycleRecognitionEngine.judge(cycleRequest);
         var cycleCard = judgmentBlockAssembler.toBlock(cycleJudgement);
 
-        EngineRequest mainlineRequest = engineRequestFactory.create(
-                query.tradeDate(),
-                query.asOfDate(),
-                query.judgementMode(),
-                EngineType.MAINLINE,
-                TargetType.PLATE,
-                null,
-                null,
-                query.ruleVersion(),
-                MAINLINE_REQUIRED_TABLES,
-                Map.of()
-        );
-        var mainlineJudgement = mainlineRecognitionEngine.judge(mainlineRequest);
-        var mainlineCard = judgmentBlockAssembler.toBlock(mainlineJudgement);
-
-        List<NextWatchItemVO> nextWatchList = mergeNextWatch(cycleCard.nextWatchList(), mainlineCard.nextWatchList());
-        List<DataQualityIssueVO> dataQualityIssues = mergeDataQualityIssues(cycleCard.dataQualityIssues(), mainlineCard.dataQualityIssues());
+        List<JudgmentBlockVO<MainlineJudgementDetail>> mainlineCards = buildMainlineCards(query);
+        List<NextWatchItemVO> nextWatchList = new ArrayList<>(safeList(cycleCard.nextWatchList()));
+        List<DataQualityIssueVO> dataQualityIssues = new ArrayList<>(safeList(cycleCard.dataQualityIssues()));
+        mainlineCards.forEach(card -> {
+            nextWatchList.addAll(safeList(card.nextWatchList()));
+            dataQualityIssues.addAll(safeList(card.dataQualityIssues()));
+        });
 
         return ApiResponse.ok(new MarketOverviewVO(
                 query,
                 cycleCard,
-                List.of(mainlineCard),
+                mainlineCards,
                 List.of(),
                 null,
                 null,
@@ -97,18 +92,47 @@ public class MarketOverviewController {
         ));
     }
 
-    private List<NextWatchItemVO> mergeNextWatch(List<NextWatchItemVO> cycleItems, List<NextWatchItemVO> mainlineItems) {
-        List<NextWatchItemVO> merged = new ArrayList<>();
-        merged.addAll(safeList(cycleItems));
-        merged.addAll(safeList(mainlineItems));
-        return merged;
+    private List<JudgmentBlockVO<MainlineJudgementDetail>> buildMainlineCards(MarketQuery query) {
+        List<MainlineCandidate> candidates = mainlineCandidateSelector.selectCandidates(query.tradeDate(), 3);
+        if (candidates.isEmpty()) {
+            EngineRequest request = createMainlineRequest(query, null, null, Map.of());
+            return List.of(judgmentBlockAssembler.toBlock(mainlineRecognitionEngine.judge(request)));
+        }
+        return candidates.stream()
+                .map(candidate -> {
+                    EngineRequest request = createMainlineRequest(
+                            query,
+                            candidate.plateCode(),
+                            candidate.plateName(),
+                            candidateParams(candidate)
+                    );
+                    return judgmentBlockAssembler.toBlock(mainlineRecognitionEngine.judge(request));
+                })
+                .toList();
     }
 
-    private List<DataQualityIssueVO> mergeDataQualityIssues(List<DataQualityIssueVO> cycleIssues, List<DataQualityIssueVO> mainlineIssues) {
-        List<DataQualityIssueVO> merged = new ArrayList<>();
-        merged.addAll(safeList(cycleIssues));
-        merged.addAll(safeList(mainlineIssues));
-        return merged;
+    private EngineRequest createMainlineRequest(MarketQuery query, String plateCode, String plateName, Map<String, Object> params) {
+        return engineRequestFactory.create(
+                query.tradeDate(),
+                query.asOfDate(),
+                query.judgementMode(),
+                EngineType.MAINLINE,
+                TargetType.PLATE,
+                plateCode,
+                plateName,
+                query.ruleVersion(),
+                MAINLINE_REQUIRED_TABLES,
+                params
+        );
+    }
+
+    private Map<String, Object> candidateParams(MainlineCandidate candidate) {
+        return Map.of(
+                "plateType", candidate.plateType(),
+                "candidateRank", candidate.candidateRank(),
+                "candidateScore", candidate.candidateScore(),
+                "candidateReason", candidate.candidateReason()
+        );
     }
 
     private <T> List<T> safeList(List<T> items) {

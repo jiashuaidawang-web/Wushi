@@ -1,6 +1,7 @@
 package com.wushi.api.controller;
 
 import com.wushi.api.assembler.JudgmentBlockAssembler;
+import com.wushi.api.vo.common.JudgmentBlockVO;
 import com.wushi.api.vo.common.MarketQuery;
 import com.wushi.api.vo.page.MainlineDashboardVO;
 import com.wushi.common.api.ApiResponse;
@@ -8,6 +9,9 @@ import com.wushi.common.enums.EngineType;
 import com.wushi.common.enums.JudgementMode;
 import com.wushi.common.enums.TargetType;
 import com.wushi.module.mainline.engine.MainlineRecognitionEngine;
+import com.wushi.module.mainline.model.MainlineCandidate;
+import com.wushi.module.mainline.model.MainlineJudgementDetail;
+import com.wushi.module.mainline.service.MainlineCandidateSelector;
 import com.wushi.module.rule.engine.core.EngineRequest;
 import com.wushi.module.rule.support.EngineRequestFactory;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +37,7 @@ public class MainlineDashboardController {
 
     private final EngineRequestFactory engineRequestFactory;
     private final MainlineRecognitionEngine mainlineRecognitionEngine;
+    private final MainlineCandidateSelector mainlineCandidateSelector;
     private final JudgmentBlockAssembler judgmentBlockAssembler;
 
     @GetMapping("/dashboard")
@@ -42,8 +47,41 @@ public class MainlineDashboardController {
             @RequestParam(required = false) JudgementMode judgementMode,
             @RequestParam(required = false) String ruleVersion,
             @RequestParam(required = false) String plateCode,
-            @RequestParam(required = false) String plateName) {
+            @RequestParam(required = false) String plateName,
+            @RequestParam(required = false, defaultValue = "5") Integer candidateLimit) {
         MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
+        List<JudgmentBlockVO<MainlineJudgementDetail>> mainlineCards = buildMainlineCards(query, plateCode, plateName, candidateLimit);
+        String summary = buildCompetitionSummary(mainlineCards);
+        return ApiResponse.ok(new MainlineDashboardVO(query, mainlineCards, summary));
+    }
+
+    private List<JudgmentBlockVO<MainlineJudgementDetail>> buildMainlineCards(
+            MarketQuery query,
+            String plateCode,
+            String plateName,
+            Integer candidateLimit) {
+        if (plateCode != null && !plateCode.isBlank()) {
+            EngineRequest request = createRequest(query, plateCode, plateName, Map.of());
+            var judgement = mainlineRecognitionEngine.judge(request);
+            return List.of(judgmentBlockAssembler.toBlock(judgement));
+        }
+
+        List<MainlineCandidate> candidates = mainlineCandidateSelector.selectCandidates(query.tradeDate(), safeLimit(candidateLimit));
+        if (candidates.isEmpty()) {
+            EngineRequest request = createRequest(query, null, null, Map.of());
+            var judgement = mainlineRecognitionEngine.judge(request);
+            return List.of(judgmentBlockAssembler.toBlock(judgement));
+        }
+
+        return candidates.stream()
+                .map(candidate -> {
+                    EngineRequest request = createRequest(query, candidate.plateCode(), candidate.plateName(), candidateParams(candidate));
+                    return judgmentBlockAssembler.toBlock(mainlineRecognitionEngine.judge(request));
+                })
+                .toList();
+    }
+
+    private EngineRequest createRequest(MarketQuery query, String plateCode, String plateName, Map<String, Object> params) {
         EngineRequest request = engineRequestFactory.create(
                 query.tradeDate(),
                 query.asOfDate(),
@@ -54,16 +92,37 @@ public class MainlineDashboardController {
                 plateName,
                 query.ruleVersion(),
                 REQUIRED_TABLES,
-                Map.of()
+                params
         );
-        var judgement = mainlineRecognitionEngine.judge(request);
-        String summary = judgement.getDetail() == null
-                ? "主线推演暂不可用"
-                : judgement.getDetail().tomorrowValidation();
-        return ApiResponse.ok(new MainlineDashboardVO(
-                query,
-                List.of(judgmentBlockAssembler.toBlock(judgement)),
-                summary
-        ));
+        return request;
+    }
+
+    private Map<String, Object> candidateParams(MainlineCandidate candidate) {
+        return Map.of(
+                "plateType", candidate.plateType(),
+                "candidateRank", candidate.candidateRank(),
+                "candidateScore", candidate.candidateScore(),
+                "candidateReason", candidate.candidateReason()
+        );
+    }
+
+    private int safeLimit(Integer candidateLimit) {
+        if (candidateLimit == null || candidateLimit <= 0) {
+            return 5;
+        }
+        return Math.min(candidateLimit, 10);
+    }
+
+    private String buildCompetitionSummary(List<JudgmentBlockVO<MainlineJudgementDetail>> mainlineCards) {
+        if (mainlineCards == null || mainlineCards.isEmpty()) {
+            return "主线推演暂不可用";
+        }
+        JudgmentBlockVO<MainlineJudgementDetail> first = mainlineCards.get(0);
+        if (first.detail() == null) {
+            return "主线推演暂不可用";
+        }
+        String leader = first.detail().plateName() == null ? first.detail().plateCode() : first.detail().plateName();
+        return "当前排名第一的主线候选是 " + leader + "，"
+                + first.detail().candidateReason() + " 明日重点验证：" + first.detail().tomorrowValidation();
     }
 }
