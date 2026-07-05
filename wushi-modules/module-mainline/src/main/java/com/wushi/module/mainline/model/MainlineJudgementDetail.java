@@ -1,6 +1,7 @@
 package com.wushi.module.mainline.model;
 
 import com.wushi.common.enums.MainlineStatus;
+import com.wushi.common.enums.MainlineLifecycleStage;
 import com.wushi.common.model.FactorResult;
 
 import java.math.BigDecimal;
@@ -14,6 +15,11 @@ public record MainlineJudgementDetail(
         BigDecimal candidateScore,
         String candidateReason,
         MainlineStatus mainlineStatus,
+        MainlineLifecycleStage lifecycleStage,
+        String lifecycleStageName,
+        String lifecycleReason,
+        String lifecycleRisk,
+        String lifecycleNextSignal,
         BigDecimal strengthScore,
         BigDecimal continuityScore,
         BigDecimal ladderIntegrityScore,
