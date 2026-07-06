@@ -1,5 +1,51 @@
 USE wushi;
 
+DELIMITER //
+DROP PROCEDURE IF EXISTS migrate_rule_candidate_columns//
+CREATE PROCEDURE migrate_rule_candidate_columns()
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'rule_version' AND COLUMN_NAME = 'source_rule_version'
+    ) THEN
+        ALTER TABLE rule_version ADD COLUMN source_rule_version VARCHAR(64) NULL COMMENT '候选版本来源规则版本' AFTER description;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'rule_version' AND COLUMN_NAME = 'candidate_stat_date'
+    ) THEN
+        ALTER TABLE rule_version ADD COLUMN candidate_stat_date DATE NULL COMMENT '生成候选版本的经验统计日期' AFTER source_rule_version;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'rule_version' AND COLUMN_NAME = 'approved_by'
+    ) THEN
+        ALTER TABLE rule_version ADD COLUMN approved_by VARCHAR(64) NULL COMMENT '批准或拒绝人' AFTER effective_date;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'rule_version' AND COLUMN_NAME = 'approved_at'
+    ) THEN
+        ALTER TABLE rule_version ADD COLUMN approved_at DATETIME NULL COMMENT '批准或拒绝时间' AFTER approved_by;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'rule_version' AND COLUMN_NAME = 'approval_remark'
+    ) THEN
+        ALTER TABLE rule_version ADD COLUMN approval_remark TEXT NULL COMMENT '批准或拒绝备注' AFTER approved_at;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'rule_version' AND INDEX_NAME = 'idx_rule_candidate'
+    ) THEN
+        ALTER TABLE rule_version ADD INDEX idx_rule_candidate (engine_type, status, source_rule_version, candidate_stat_date);
+    END IF;
+END//
+DELIMITER ;
+
+CALL migrate_rule_candidate_columns();
+DROP PROCEDURE migrate_rule_candidate_columns;
+
 CREATE TABLE IF NOT EXISTS factor_performance_stat
 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键 ID',

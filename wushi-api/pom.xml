@@ -27,6 +27,31 @@
         </dependency>
         <dependency>
             <groupId>com.wushi</groupId>
+            <artifactId>module-pattern</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.wushi</groupId>
+            <artifactId>module-risk</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.wushi</groupId>
+            <artifactId>module-similarity</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.wushi</groupId>
+            <artifactId>module-review</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.wushi</groupId>
+            <artifactId>module-backtest</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.wushi</groupId>
             <artifactId>module-rule</artifactId>
             <version>${project.version}</version>
         </dependency>

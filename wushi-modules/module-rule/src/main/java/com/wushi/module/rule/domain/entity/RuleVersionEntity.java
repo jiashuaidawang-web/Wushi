@@ -19,7 +19,12 @@ public class RuleVersionEntity {
     private String engineType;
     private String status;
     private String description;
+    private String sourceRuleVersion;
+    private LocalDate candidateStatDate;
     private LocalDate effectiveDate;
+    private String approvedBy;
+    private LocalDateTime approvedAt;
+    private String approvalRemark;
     private String createdBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

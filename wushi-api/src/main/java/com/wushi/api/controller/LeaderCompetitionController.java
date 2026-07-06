@@ -48,9 +48,11 @@ public class LeaderCompetitionController {
             @RequestParam(required = false) String ruleVersion,
             @RequestParam(required = false) String stockCode,
             @RequestParam(required = false) String stockName,
+            @RequestParam(required = false) String plateCode,
+            @RequestParam(required = false) String plateName,
             @RequestParam(required = false, defaultValue = "5") Integer candidateLimit) {
         MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
-        EngineRequest request = createRequest(query, stockCode, stockName);
+        EngineRequest request = createRequest(query, stockCode, stockName, plateCode, plateName);
         List<JudgmentBlockVO<LeaderJudgementDetail>> leaderCards = leaderCompetitionEngine
                 .judgeCandidates(request, safeLimit(candidateLimit))
                 .stream()
@@ -59,7 +61,7 @@ public class LeaderCompetitionController {
         return ApiResponse.ok(new LeaderCompetitionVO(query, leaderCards, buildCompetitionSummary(leaderCards)));
     }
 
-    private EngineRequest createRequest(MarketQuery query, String stockCode, String stockName) {
+    private EngineRequest createRequest(MarketQuery query, String stockCode, String stockName, String plateCode, String plateName) {
         return engineRequestFactory.create(
                 query.tradeDate(),
                 query.asOfDate(),
@@ -70,8 +72,19 @@ public class LeaderCompetitionController {
                 stockName,
                 query.ruleVersion(),
                 REQUIRED_TABLES,
-                Map.of()
+                requestParams(plateCode, plateName)
         );
+    }
+
+    private Map<String, Object> requestParams(String plateCode, String plateName) {
+        java.util.HashMap<String, Object> params = new java.util.HashMap<>();
+        if (plateCode != null && !plateCode.isBlank()) {
+            params.put("plateCode", plateCode);
+        }
+        if (plateName != null && !plateName.isBlank()) {
+            params.put("plateName", plateName);
+        }
+        return params;
     }
 
     private int safeLimit(Integer candidateLimit) {

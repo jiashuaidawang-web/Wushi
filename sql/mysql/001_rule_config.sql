@@ -7,13 +7,19 @@ CREATE TABLE IF NOT EXISTS rule_version
     rule_version VARCHAR(64) NOT NULL COMMENT '规则版本号',
     rule_name VARCHAR(128) NOT NULL COMMENT '规则名称',
     engine_type VARCHAR(64) NOT NULL COMMENT '适用引擎类型',
-    status VARCHAR(32) NOT NULL COMMENT '状态，DRAFT/ACTIVE/ARCHIVED',
+    status VARCHAR(32) NOT NULL COMMENT '状态，DRAFT/CANDIDATE/ACTIVE/ARCHIVED/REJECTED',
     description TEXT NULL COMMENT '规则说明',
+    source_rule_version VARCHAR(64) NULL COMMENT '候选版本来源规则版本',
+    candidate_stat_date DATE NULL COMMENT '生成候选版本的经验统计日期',
     effective_date DATE NULL COMMENT '生效日期',
+    approved_by VARCHAR(64) NULL COMMENT '批准或拒绝人',
+    approved_at DATETIME NULL COMMENT '批准或拒绝时间',
+    approval_remark TEXT NULL COMMENT '批准或拒绝备注',
     created_by VARCHAR(64) NOT NULL DEFAULT 'system' COMMENT '创建人',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    UNIQUE KEY uk_rule_version (rule_version, engine_type)
+    UNIQUE KEY uk_rule_version (rule_version, engine_type),
+    KEY idx_rule_candidate (engine_type, status, source_rule_version, candidate_stat_date)
 ) COMMENT='规则版本表';
 
 CREATE TABLE IF NOT EXISTS factor_definition

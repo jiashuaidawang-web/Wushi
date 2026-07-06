@@ -10,3 +10,4 @@
 4. `004_spider_audit.sql`：爬虫任务检查点、同步审计、数据质量审计。
 5. `005_dashboard_config.sql`：页面卡片配置表。
 6. `006_seed_rule_config.sql`：一期默认规则、因子、组合条件、数据质量扣分和页面卡片种子数据。
+7. `007_rule_version_evolution.sql`：规则候选版本、候选因子权重变化，用于经验统计生成候选和人工审批生效闭环。

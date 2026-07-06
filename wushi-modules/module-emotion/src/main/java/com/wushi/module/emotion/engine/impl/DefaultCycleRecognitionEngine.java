@@ -63,6 +63,9 @@ public class DefaultCycleRecognitionEngine implements CycleRecognitionEngine {
                         decision.stageScore(),
                         decision.transitionSignal(),
                         decision.stageReason(),
+                        decision.strategyBoundary(),
+                        decision.allowedMode(),
+                        decision.falseSignalRisk(),
                         factorResult.getFactorResults()
                 ))
                 .evidenceList(factorResult.getEvidenceList())
@@ -110,7 +113,10 @@ public class DefaultCycleRecognitionEngine implements CycleRecognitionEngine {
                     confidence,
                     "退潮杀跌",
                     "亏钱效应与跌停负反馈同步扩散，赚钱效应不足，周期边界应先收缩。",
-                    "市场处于退潮杀跌，先看风险是否释放，而不是寻找个股机会。"
+                    "市场处于退潮杀跌，先看风险是否释放，而不是寻找个股机会。",
+                    "周期不支持主动进攻，策略边界是防守、降频、等待亏钱效应衰竭。",
+                    "空仓/轻仓观察，高位股和补涨股不参与，只记录风险兑现样本。",
+                    "若只出现局部反抽但跌停、高位负反馈未收敛，属于假修复。"
             );
         }
         if (!lossControlled && (warningCount > 0 || !brokenControlled)) {
@@ -121,7 +127,10 @@ public class DefaultCycleRecognitionEngine implements CycleRecognitionEngine {
                     confidence,
                     "高位分歧",
                     "赚钱效应可能仍在，但亏钱效应或炸板分歧已经抬头，需要警惕一致后的兑现。",
-                    "市场进入高位分歧，重点验证核心股能否修复，以及后排是否继续亏钱。"
+                    "市场进入高位分歧，重点验证核心股能否修复，以及后排是否继续亏钱。",
+                    "周期边界从进攻转为控仓，只有核心主线分歧转一致才有观察价值。",
+                    "只看龙头分歧修复和主线核心，回避后排补涨和明牌一致。",
+                    "高位一致后继续缩量加速、后排大面增加，是牛末/退潮的假强信号。"
             );
         }
         if (moneyStrong && widthStrong && limitUpStrong && lossControlled && limitDownControlled && brokenControlled) {
@@ -132,7 +141,10 @@ public class DefaultCycleRecognitionEngine implements CycleRecognitionEngine {
                     confidence,
                     "赚钱效应扩散",
                     "涨停、赚钱效应、市场宽度与亏钱效应收敛形成共振，市场从修复向强周期推进。",
-                    "市场赚钱效应扩散，适合继续观察主线是否确认和龙头是否竞争上位。"
+                    "市场赚钱效应扩散，适合继续观察主线是否确认和龙头是否竞争上位。",
+                    "周期支持试错到进攻，但个股必须服从主线和龙头地位。",
+                    "可参与主线确认、龙头上位、趋势核心和健康分歧转一致。",
+                    "若主线未确认、后排先高潮，容易形成假扩散。"
             );
         }
         if (moneyStrong && lossControlled && supportCount >= 3) {
@@ -143,7 +155,10 @@ public class DefaultCycleRecognitionEngine implements CycleRecognitionEngine {
                     confidence,
                     "弱修复",
                     "赚钱效应开始恢复，亏钱效应相对可控，但宽度或涨停结构尚未全面共振。",
-                    "市场处于修复期，重点看题材能否从轮动走向持续主线。"
+                    "市场处于修复期，重点看题材能否从轮动走向持续主线。",
+                    "周期允许低强度试错，但必须等待主线持续性和亏钱效应继续收敛。",
+                    "轻仓观察点火/发酵主线，优先看龙头候选和中军承接。",
+                    "一日游轮动、次日无承接，是假修复。"
             );
         }
         if (lossControlled && !moneyStrong) {
@@ -154,7 +169,10 @@ public class DefaultCycleRecognitionEngine implements CycleRecognitionEngine {
                     confidence,
                     "恐慌衰竭",
                     "亏钱效应开始收敛，但赚钱效应尚未恢复，可能是熊末或真冰点观察区。",
-                    "市场可能处于冰点衰竭，明日需要验证资金是否回流和涨停质量是否提升。"
+                    "市场可能处于冰点衰竭，明日需要验证资金是否回流和涨停质量是否提升。",
+                    "周期仍偏防守，只能观察真冰点是否成立。",
+                    "只记录恐慌释放、政策修复、妖股活跃和第一批回流方向。",
+                    "下跌中继里的弱反弹是假冰点，必须看资金回流和亏钱效应衰竭。"
             );
         }
         return new CycleStageDecision(
@@ -164,7 +182,10 @@ public class DefaultCycleRecognitionEngine implements CycleRecognitionEngine {
                 confidence,
                 "混沌观察",
                 "周期证据尚未形成清晰共振，支持与冲突并存，不宜输出绝对判断。",
-                "市场周期处于混沌观察，等待赚钱效应、亏钱效应和宽度进一步确认。"
+                "市场周期处于混沌观察，等待赚钱效应、亏钱效应和宽度进一步确认。",
+                "周期边界不清晰，策略必须降低确定性假设。",
+                "只做观察和复盘，不把局部强度外推成系统机会。",
+                "支持与冲突并存时，任何单一指标走强都可能是假信号。"
         );
     }
 
@@ -285,7 +306,10 @@ public class DefaultCycleRecognitionEngine implements CycleRecognitionEngine {
             BigDecimal confidence,
             String transitionSignal,
             String stageReason,
-            String conclusion
+            String conclusion,
+            String strategyBoundary,
+            String allowedMode,
+            String falseSignalRisk
     ) {
     }
 }

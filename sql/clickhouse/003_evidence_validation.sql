@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS wushi.evidence_validation_item
     validation_date Date COMMENT '验证交易日',
     factor_code String COMMENT '因子代码',
     evidence_type String COMMENT '原证据类型',
-    validation_result String COMMENT '证据验证结果，VALID/INVALID/CONFLICT_VALID/INSUFFICIENT',
+    validation_result String COMMENT '证据验证结果，VALID/INVALID/CONFLICT_VALID/WARNING_VALID/INSUFFICIENT',
     contribution_score Decimal(10, 4) COMMENT '证据贡献分',
     created_at DateTime DEFAULT now() COMMENT '创建时间'
 )

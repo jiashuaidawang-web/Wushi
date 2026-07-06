@@ -15,6 +15,9 @@ public record CycleJudgementDetail(
         BigDecimal stageScore,
         String transitionSignal,
         String stageReason,
+        String strategyBoundary,
+        String allowedMode,
+        String falseSignalRisk,
         List<FactorResult> factorResults
 ) {
 }

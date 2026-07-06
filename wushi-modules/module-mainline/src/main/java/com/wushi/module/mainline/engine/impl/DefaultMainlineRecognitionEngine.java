@@ -40,8 +40,9 @@ public class DefaultMainlineRecognitionEngine implements MainlineRecognitionEngi
     @Override
     public JudgementResult<MainlineJudgementDetail> judge(EngineRequest request) {
         FactorCalculateResult factorResult = mainlineFactorCalculator.calculate(toFactorRequest(request));
-        MainlineDecision decision = decideMainline(factorResult.getFactorResults());
-        LifecycleDecision lifecycle = decideLifecycle(factorResult.getFactorResults(), decision.mainlineStatus());
+        CycleBoundary cycleBoundary = CycleBoundary.from(request);
+        MainlineDecision decision = applyCycleBoundary(decideMainline(factorResult.getFactorResults()), cycleBoundary);
+        LifecycleDecision lifecycle = applyCycleBoundary(decideLifecycle(factorResult.getFactorResults(), decision.mainlineStatus()), cycleBoundary);
         String plateCode = defaultText(request.targetCode(), "AUTO");
         String plateName = defaultText(request.targetName(), "自动识别主线候选");
         String judgementId = "MAINLINE-" + request.tradeDate() + "-" + plateCode + "-" + UUID.randomUUID();
@@ -62,10 +63,10 @@ public class DefaultMainlineRecognitionEngine implements MainlineRecognitionEngi
                 .detail(new MainlineJudgementDetail(
                         plateCode,
                         plateName,
-                        stringParam(request, "plateType", null),
-                        intParam(request, "candidateRank"),
-                        decimalParam(request, "candidateScore"),
-                        stringParam(request, "candidateReason", null),
+                        stringParamAny(request, null, "candidate.plateType", "plateType"),
+                        intParamAny(request, "candidate.rank", "candidateRank"),
+                        decimalParamAny(request, "candidate.score", "candidateScore"),
+                        stringParamAny(request, null, "candidate.reason", "candidateReason"),
                         decision.mainlineStatus(),
                         lifecycle.lifecycleStage(),
                         lifecycle.stageName(),
@@ -79,6 +80,12 @@ public class DefaultMainlineRecognitionEngine implements MainlineRecognitionEngi
                         value(factorResult.getFactorResults(), "MAINLINE_MIDDLE_ARMY_SUPPORT"),
                         value(factorResult.getFactorResults(), "MAINLINE_REAR_RISK"),
                         value(factorResult.getFactorResults(), "MAINLINE_CAPITAL_INFLOW"),
+                        participationDecision(decision, lifecycle, cycleBoundary),
+                        strengthEvidence(factorResult.getFactorResults()),
+                        continuityEvidence(factorResult.getFactorResults()),
+                        extensibilityEvidence(factorResult.getFactorResults()),
+                        competitivenessEvidence(factorResult.getFactorResults(), lifecycle, cycleBoundary),
+                        driveEvidence(factorResult.getFactorResults()),
                         decision.satisfiedConditions(),
                         decision.unmetCondition(),
                         decision.tomorrowValidation(),
@@ -302,6 +309,63 @@ public class DefaultMainlineRecognitionEngine implements MainlineRecognitionEngi
         }
     }
 
+    private String participationDecision(MainlineDecision decision, LifecycleDecision lifecycle, CycleBoundary cycleBoundary) {
+        if (cycleBoundary.isHardRisk()) {
+            return "不参与：周期边界不支持主线接力，只允许观察是否出现真冰点或退潮后的修复确认。";
+        }
+        if (decision.mainlineStatus() == MainlineStatus.MAIN
+                && lifecycle.lifecycleStage() != MainlineLifecycleStage.CONSENSUS
+                && lifecycle.lifecycleStage() != MainlineLifecycleStage.DECLINE
+                && lifecycle.lifecycleStage() != MainlineLifecycleStage.EBB_TIDE) {
+            return "可参与观察：主线条件较完整，优先等待龙头或核心中军的分歧转一致。";
+        }
+        if (decision.mainlineStatus() == MainlineStatus.CANDIDATE
+                || lifecycle.lifecycleStage() == MainlineLifecycleStage.IGNITION
+                || lifecycle.lifecycleStage() == MainlineLifecycleStage.FERMENTATION) {
+            return "试错观察：方向有合力雏形，但必须等持续性、梯队和中军承接补齐。";
+        }
+        if (lifecycle.lifecycleStage() == MainlineLifecycleStage.CONSENSUS
+                || lifecycle.lifecycleStage() == MainlineLifecycleStage.RE_CONSENSUS) {
+            return "谨慎参与：一致阶段不追明牌，重点等健康分歧后的再确认。";
+        }
+        if (lifecycle.lifecycleStage() == MainlineLifecycleStage.DECLINE
+                || lifecycle.lifecycleStage() == MainlineLifecycleStage.EBB_TIDE) {
+            return "不参与：主线衰退或退潮，优先观察风险兑现和新方向切换。";
+        }
+        return "不参与：主线证据不足，暂按轮动噪音处理。";
+    }
+
+    private String strengthEvidence(List<FactorResult> factors) {
+        return "强度看涨停数、资金流入和涨幅扩散；当前涨停强度="
+                + defaultZero(value(factors, "MAINLINE_LIMIT_UP_COUNT"))
+                + "，资金流入=" + defaultZero(value(factors, "MAINLINE_CAPITAL_INFLOW")) + "。";
+    }
+
+    private String continuityEvidence(List<FactorResult> factors) {
+        return "持续性看连续活跃天数和梯队是否断层；当前连续活跃="
+                + defaultZero(value(factors, "MAINLINE_ACTIVE_DAYS"))
+                + "，梯队完整度=" + defaultZero(value(factors, "MAINLINE_LADDER_INTEGRITY")) + "。";
+    }
+
+    private String extensibilityEvidence(List<FactorResult> factors) {
+        return "扩展性看龙头外是否扩散到中军、补涨和后排；当前中军承接="
+                + defaultZero(value(factors, "MAINLINE_MIDDLE_ARMY_SUPPORT"))
+                + "，后排风险=" + defaultZero(value(factors, "MAINLINE_REAR_RISK")) + "。";
+    }
+
+    private String competitivenessEvidence(List<FactorResult> factors, LifecycleDecision lifecycle, CycleBoundary cycleBoundary) {
+        return "竞争性看该方向是否压过其他轮动题材，并处于生命周期的优势阶段；当前阶段="
+                + lifecycle.stageName()
+                + "，龙头质量=" + defaultZero(value(factors, "MAINLINE_LEADER_QUALITY"))
+                + "；上游周期=" + cycleBoundary.describe() + "。";
+    }
+
+    private String driveEvidence(List<FactorResult> factors) {
+        return "带动性看龙头能否带动板块、板块能否反哺市场情绪；当前龙头质量="
+                + defaultZero(value(factors, "MAINLINE_LEADER_QUALITY"))
+                + "，梯队完整度=" + defaultZero(value(factors, "MAINLINE_LADDER_INTEGRITY")) + "。";
+    }
+
     private List<NextWatchItem> buildNextWatchList(String judgementId, EngineRequest request, String plateCode,
                                                    String plateName, LifecycleDecision lifecycle) {
         LocalDate watchDate = request.tradeDate() == null ? null : request.tradeDate().plusDays(1);
@@ -413,18 +477,96 @@ public class DefaultMainlineRecognitionEngine implements MainlineRecognitionEngi
     }
 
     private String enrichConclusion(String conclusion, EngineRequest request, LifecycleDecision lifecycle) {
-        Integer rank = intParam(request, "candidateRank");
-        String reason = stringParam(request, "candidateReason", null);
+        Integer rank = intParamAny(request, "candidate.rank", "candidateRank");
+        String reason = stringParamAny(request, null, "candidate.reason", "candidateReason");
         String lifecycleText = lifecycle == null || lifecycle.stageName() == null
                 ? ""
                 : "生命周期：" + lifecycle.stageName();
+        String cycleText = cycleText(request);
         String rankText = rank == null ? "候选排序未定" : "候选排名第" + rank;
         String reasonText = reason == null || reason.isBlank() ? "" : "；" + reason;
-        if (rank == null && reasonText.isBlank() && lifecycleText.isBlank()) {
+        if (rank == null && reasonText.isBlank() && lifecycleText.isBlank() && cycleText.isBlank()) {
             return conclusion;
         }
         String prefix = lifecycleText.isBlank() ? rankText : rankText + "；" + lifecycleText;
+        if (!cycleText.isBlank()) {
+            prefix = prefix + "；" + cycleText;
+        }
         return conclusion + "（" + prefix + reasonText + "）";
+    }
+
+    private MainlineDecision applyCycleBoundary(MainlineDecision decision, CycleBoundary boundary) {
+        if (!boundary.hasCycleContext()) {
+            return decision;
+        }
+        if (boundary.isHardRisk() && decision.mainlineStatus() == MainlineStatus.MAIN) {
+            return new MainlineDecision(
+                    MainlineStatus.CANDIDATE,
+                    decision.confidence().subtract(new BigDecimal("0.1200")).max(ZERO),
+                    decision.transitionSignal(),
+                    decision.satisfiedConditionText(),
+                    appendText(decision.unmetCondition(), "周期边界不支持直接确认主线"),
+                    "优先验证全市场亏钱效应是否收敛、龙头是否能逆势带动，确认前只按候选观察。",
+                    decision.conclusion() + " 但上游周期处于风险边界，系统降级为主线候选，防止把反抽误判为主线。"
+            );
+        }
+        if (boundary.isHardRisk() && decision.mainlineStatus() == MainlineStatus.CANDIDATE) {
+            return new MainlineDecision(
+                    MainlineStatus.NEW_THEME,
+                    decision.confidence().subtract(new BigDecimal("0.0800")).max(ZERO),
+                    decision.transitionSignal(),
+                    decision.satisfiedConditionText(),
+                    appendText(decision.unmetCondition(), "周期风险仍未解除"),
+                    "明日先验证市场亏钱效应是否收敛，再验证该方向是否持续活跃。",
+                    decision.conclusion() + " 上游周期偏弱，先降为新题材观察，不按可参与主线处理。"
+            );
+        }
+        if (boundary.isSupportive() && decision.mainlineStatus() == MainlineStatus.CANDIDATE) {
+            return new MainlineDecision(
+                    MainlineStatus.CANDIDATE,
+                    decision.confidence().add(new BigDecimal("0.0500")).min(ONE),
+                    decision.transitionSignal(),
+                    decision.satisfiedConditionText(),
+                    decision.unmetCondition(),
+                    decision.tomorrowValidation(),
+                    decision.conclusion() + " 上游周期处于修复/赚钱扩散窗口，允许提高主线确认优先级。"
+            );
+        }
+        return decision;
+    }
+
+    private LifecycleDecision applyCycleBoundary(LifecycleDecision lifecycle, CycleBoundary boundary) {
+        if (!boundary.hasCycleContext()) {
+            return lifecycle;
+        }
+        if (boundary.isHardRisk()
+                && lifecycle.lifecycleStage() != MainlineLifecycleStage.DECLINE
+                && lifecycle.lifecycleStage() != MainlineLifecycleStage.EBB_TIDE
+                && lifecycle.lifecycleStage() != MainlineLifecycleStage.UNKNOWN) {
+            return new LifecycleDecision(
+                    lifecycle.lifecycleStage(),
+                    lifecycle.stageName(),
+                    lifecycle.reason() + " 但上游周期处于风险边界，本阶段只能按逆势修复观察。",
+                    "周期不支持时，主线信号容易从分歧演变为退潮，不能直接放大参与级别。",
+                    "先验证市场亏钱效应是否收敛，再验证板块龙头是否继续带动。"
+            );
+        }
+        return lifecycle;
+    }
+
+    private String appendText(String origin, String addition) {
+        if (addition == null || addition.isBlank()) {
+            return origin;
+        }
+        if (origin == null || origin.isBlank()) {
+            return addition;
+        }
+        return origin + "、" + addition;
+    }
+
+    private String cycleText(EngineRequest request) {
+        CycleBoundary boundary = CycleBoundary.from(request);
+        return boundary.hasCycleContext() ? "周期边界：" + boundary.describe() : "";
     }
 
     private String stringParam(EngineRequest request, String key, String defaultValue) {
@@ -432,6 +574,16 @@ public class DefaultMainlineRecognitionEngine implements MainlineRecognitionEngi
             return defaultValue;
         }
         return String.valueOf(request.params().get(key));
+    }
+
+    private String stringParamAny(EngineRequest request, String defaultValue, String... keys) {
+        for (String key : keys) {
+            String value = stringParam(request, key, null);
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return defaultValue;
     }
 
     private Integer intParam(EngineRequest request, String key) {
@@ -447,6 +599,16 @@ public class DefaultMainlineRecognitionEngine implements MainlineRecognitionEngi
             return null;
         }
         return Integer.valueOf(text);
+    }
+
+    private Integer intParamAny(EngineRequest request, String... keys) {
+        for (String key : keys) {
+            Integer value = intParam(request, key);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private BigDecimal decimalParam(EngineRequest request, String key) {
@@ -465,6 +627,16 @@ public class DefaultMainlineRecognitionEngine implements MainlineRecognitionEngi
             return null;
         }
         return new BigDecimal(text).setScale(4, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal decimalParamAny(EngineRequest request, String... keys) {
+        for (String key : keys) {
+            BigDecimal value = decimalParam(request, key);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private record MainlineDecision(
@@ -499,5 +671,95 @@ public class DefaultMainlineRecognitionEngine implements MainlineRecognitionEngi
             String risk,
             String nextSignal
     ) {
+    }
+
+    private record CycleBoundary(
+            String marketCycleStage,
+            String emotionCycleStage,
+            String strategyBoundary,
+            String allowedMode,
+            String upstreamConclusion,
+            BigDecimal upstreamConfidence
+    ) {
+        private static CycleBoundary from(EngineRequest request) {
+            return new CycleBoundary(
+                    stringParamValue(request, "cycle.marketCycleStage"),
+                    stringParamValue(request, "cycle.emotionCycleStage"),
+                    stringParamValue(request, "cycle.strategyBoundary"),
+                    stringParamValue(request, "cycle.allowedMode"),
+                    stringParamValue(request, "upstreamCycle.conclusion"),
+                    decimalParamValue(request, "upstreamCycle.confidence")
+            );
+        }
+
+        private boolean hasCycleContext() {
+            return hasText(marketCycleStage) || hasText(emotionCycleStage) || hasText(strategyBoundary)
+                    || hasText(allowedMode) || hasText(upstreamConclusion);
+        }
+
+        private boolean isHardRisk() {
+            String text = describe();
+            return containsAny(text, "熊头", "熊中", "退潮", "杀跌", "亏钱效应扩散", "少做", "不参与");
+        }
+
+        private boolean isSupportive() {
+            String text = describe();
+            return containsAny(text, "修复", "牛初", "牛中", "赚钱效应扩散", "主线发酵", "可参与");
+        }
+
+        private String describe() {
+            return String.join("/",
+                    nullToBlank(marketCycleStage),
+                    nullToBlank(emotionCycleStage),
+                    nullToBlank(strategyBoundary),
+                    nullToBlank(allowedMode),
+                    nullToBlank(upstreamConclusion)
+            );
+        }
+
+        private static boolean containsAny(String text, String... keywords) {
+            if (text == null || text.isBlank()) {
+                return false;
+            }
+            for (String keyword : keywords) {
+                if (text.contains(keyword)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static boolean hasText(String text) {
+            return text != null && !text.isBlank();
+        }
+
+        private static String nullToBlank(String text) {
+            return text == null ? "" : text;
+        }
+
+        private static String stringParamValue(EngineRequest request, String key) {
+            if (request.params() == null || request.params().get(key) == null) {
+                return null;
+            }
+            return String.valueOf(request.params().get(key));
+        }
+
+        private static BigDecimal decimalParamValue(EngineRequest request, String key) {
+            if (request.params() == null || request.params().get(key) == null) {
+                return null;
+            }
+            Object value = request.params().get(key);
+            if (value instanceof BigDecimal decimal) {
+                return decimal;
+            }
+            if (value instanceof Number number) {
+                return BigDecimal.valueOf(number.doubleValue()).setScale(4, RoundingMode.HALF_UP);
+            }
+            String text = String.valueOf(value).trim();
+            if (text.isEmpty()) {
+                return null;
+            }
+            return new BigDecimal(text).setScale(4, RoundingMode.HALF_UP);
+        }
     }
 }

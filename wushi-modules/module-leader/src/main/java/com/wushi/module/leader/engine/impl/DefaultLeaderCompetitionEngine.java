@@ -65,7 +65,7 @@ public class DefaultLeaderCompetitionEngine implements LeaderCompetitionEngine {
     public List<JudgementResult<LeaderJudgementDetail>> judgeCandidates(EngineRequest request, int candidateLimit) {
         List<CandidateIdentity> candidates = resolveCandidates(request, safeLimit(candidateLimit));
         if (candidates.isEmpty()) {
-            candidates = List.of(resolveCandidate(request));
+            return List.of();
         }
 
         List<CandidateEvaluation> evaluations = new ArrayList<>();
@@ -107,7 +107,7 @@ public class DefaultLeaderCompetitionEngine implements LeaderCompetitionEngine {
                 .targetType(TargetType.STOCK)
                 .targetCode(candidate.stockCode())
                 .targetName(candidate.stockName())
-                .conclusion(decision.conclusion())
+                .conclusion(enrichConclusionWithMainline(decision.conclusion(), candidateRequest))
                 .confidence(decision.confidence())
                 .ruleVersion(request.ruleVersion())
                 .dataQualityContext(request.dataQualityContext())
@@ -116,6 +116,10 @@ public class DefaultLeaderCompetitionEngine implements LeaderCompetitionEngine {
                         candidate.stockName(),
                         candidate.plateCode(),
                         candidate.plateName(),
+                        evaluation.marketRank(),
+                        evaluation.samePlateRank(),
+                        evaluation.competitionScore(),
+                        buildCandidateReason(evaluation, decision, candidateRequest),
                         decision.leaderType(),
                         decision.leaderStatus(),
                         value(factorResult.getFactorResults(), "LEADER_POSITION_SCORE"),
@@ -387,8 +391,9 @@ public class DefaultLeaderCompetitionEngine implements LeaderCompetitionEngine {
     }
 
     private List<CandidateIdentity> resolveCandidates(EngineRequest request, int candidateLimit) {
+        String requestedPlateCode = scopedPlateCode(request);
         if (StringUtils.hasText(request.targetCode())) {
-            return List.of(resolveCandidateByStock(request, request.targetCode(), request.targetName()));
+            return List.of(resolveCandidateByStock(request, request.targetCode(), request.targetName(), requestedPlateCode));
         }
         return safeRows(FactTable.STOCK_LIMIT_STATUS_DAILY, request).stream()
                 .filter(row -> isLimitUp(row) || isBrokenLimit(row))
@@ -396,9 +401,11 @@ public class DefaultLeaderCompetitionEngine implements LeaderCompetitionEngine {
                 .map(row -> resolveCandidateByStock(
                         request,
                         text(row.get("stock_code"), null),
-                        text(row.get("stock_name"), null)
+                        text(row.get("stock_name"), null),
+                        requestedPlateCode
                 ))
                 .filter(candidate -> StringUtils.hasText(candidate.stockCode()))
+                .filter(candidate -> !StringUtils.hasText(requestedPlateCode) || requestedPlateCode.equals(candidate.plateCode()))
                 .collect(LinkedHashMap<String, CandidateIdentity>::new,
                         (map, candidate) -> map.putIfAbsent(candidate.stockCode(), candidate),
                         LinkedHashMap::putAll)
@@ -409,16 +416,20 @@ public class DefaultLeaderCompetitionEngine implements LeaderCompetitionEngine {
     }
 
     private CandidateIdentity resolveCandidateByStock(EngineRequest request, String stockCode, String stockNameFallback) {
+        return resolveCandidateByStock(request, stockCode, stockNameFallback, scopedPlateCode(request));
+    }
+
+    private CandidateIdentity resolveCandidateByStock(EngineRequest request, String stockCode, String stockNameFallback, String requestedPlateCode) {
         List<Map<String, Object>> limitRows = safeRows(FactTable.STOCK_LIMIT_STATUS_DAILY, request);
         Map<String, Object> limitRow = findByStock(limitRows, stockCode);
         String stockName = text(limitRow.get("stock_name"), stockNameFallback);
-        Map<String, Object> relation = findBestRelation(request, stockCode, null);
-        Map<String, Object> plate = findPlate(request, text(relation.get("plate_code"), stringParam(request, "plateCode", null)));
+        Map<String, Object> relation = findBestRelation(request, stockCode, requestedPlateCode);
+        Map<String, Object> plate = findPlate(request, text(relation.get("plate_code"), requestedPlateCode));
         return new CandidateIdentity(
                 stockCode,
                 stockName,
-                text(relation.get("plate_code"), text(plate.get("plate_code"), stringParam(request, "plateCode", null))),
-                text(relation.get("plate_name"), text(plate.get("plate_name"), stringParam(request, "plateName", null)))
+                text(relation.get("plate_code"), text(plate.get("plate_code"), requestedPlateCode)),
+                text(relation.get("plate_name"), text(plate.get("plate_name"), scopedPlateName(request)))
         );
     }
 
@@ -494,6 +505,14 @@ public class DefaultLeaderCompetitionEngine implements LeaderCompetitionEngine {
         if (StringUtils.hasText(candidate.plateName())) {
             merged.put("plateName", candidate.plateName());
         }
+        String scopedPlateCode = firstText(merged, "scope.plateCode", "mainline.plateCode", "plateCode");
+        String scopedPlateName = firstText(merged, "scope.plateName", "mainline.plateName", "plateName");
+        if (StringUtils.hasText(scopedPlateCode)) {
+            merged.put("scope.plateCode", scopedPlateCode);
+        }
+        if (StringUtils.hasText(scopedPlateName)) {
+            merged.put("scope.plateName", scopedPlateName);
+        }
         return merged;
     }
 
@@ -543,6 +562,17 @@ public class DefaultLeaderCompetitionEngine implements LeaderCompetitionEngine {
     private String buildConclusion(CandidateIdentity candidate, LeaderType type, LeaderStatus status, String reason, String risk) {
         String name = defaultText(candidate.stockName(), defaultText(candidate.stockCode(), "自动候选"));
         return name + "判断为" + type + "/" + status + "；" + reason + " 风险：" + risk;
+    }
+
+    private String buildCandidateReason(CandidateEvaluation evaluation, LeaderDecision decision, EngineRequest request) {
+        CandidateIdentity candidate = evaluation.candidate();
+        String name = defaultText(candidate.stockName(), defaultText(candidate.stockCode(), "候选"));
+        String mainlineText = mainlineContextText(request);
+        return name + "竞争分" + evaluation.competitionScore()
+                + "，全市场第" + evaluation.marketRank()
+                + "，同板块第" + evaluation.samePlateRank()
+                + mainlineText
+                + "；" + decision.leaderReason();
     }
 
     private void collect(boolean passed, String satisfiedText, String unmetText, List<String> satisfied, List<String> unmet) {
@@ -707,6 +737,66 @@ public class DefaultLeaderCompetitionEngine implements LeaderCompetitionEngine {
             return defaultValue;
         }
         return String.valueOf(request.params().get(key));
+    }
+
+    private String enrichConclusionWithMainline(String conclusion, EngineRequest request) {
+        String mainlineText = mainlineContextText(request);
+        if (!StringUtils.hasText(mainlineText)) {
+            return conclusion;
+        }
+        return conclusion + "（上游主线约束" + mainlineText + "）";
+    }
+
+    private String mainlineContextText(EngineRequest request) {
+        String plateName = scopedPlateName(request);
+        String plateCode = scopedPlateCode(request);
+        String status = stringParamAny(request, null, "mainline.status", "upstreamMainline.conclusion");
+        String lifecycle = stringParamAny(request, null, "mainline.lifecycleStageName", "mainline.lifecycleStage");
+        List<String> parts = new ArrayList<>();
+        if (StringUtils.hasText(plateName) || StringUtils.hasText(plateCode)) {
+            parts.add("范围=" + defaultText(plateName, plateCode));
+        }
+        if (StringUtils.hasText(status)) {
+            parts.add("主线状态=" + status);
+        }
+        if (StringUtils.hasText(lifecycle)) {
+            parts.add("生命周期=" + lifecycle);
+        }
+        return parts.isEmpty() ? "" : "，" + String.join("，", parts);
+    }
+
+    private String scopedPlateCode(EngineRequest request) {
+        return stringParamAny(request, null, "scope.plateCode", "mainline.plateCode", "plateCode");
+    }
+
+    private String scopedPlateName(EngineRequest request) {
+        return stringParamAny(request, null, "scope.plateName", "mainline.plateName", "plateName");
+    }
+
+    private String stringParamAny(EngineRequest request, String defaultValue, String... keys) {
+        if (request.params() == null) {
+            return defaultValue;
+        }
+        for (String key : keys) {
+            Object value = request.params().get(key);
+            if (value != null && StringUtils.hasText(String.valueOf(value))) {
+                return String.valueOf(value);
+            }
+        }
+        return defaultValue;
+    }
+
+    private String firstText(Map<String, Object> params, String... keys) {
+        if (params == null) {
+            return null;
+        }
+        for (String key : keys) {
+            Object value = params.get(key);
+            if (value != null && StringUtils.hasText(String.valueOf(value))) {
+                return String.valueOf(value);
+            }
+        }
+        return null;
     }
 
     private JudgementMode defaultMode(JudgementMode judgementMode) {

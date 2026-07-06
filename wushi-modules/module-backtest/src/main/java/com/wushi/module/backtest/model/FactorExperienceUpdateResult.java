@@ -12,6 +12,7 @@ public record FactorExperienceUpdateResult(
         Integer sampleCount,
         Integer hitCount,
         Integer missCount,
+        Integer conflictHitCount,
         BigDecimal hitRate,
         BigDecimal avgContributionScore,
         BigDecimal suggestedWeightDelta,
