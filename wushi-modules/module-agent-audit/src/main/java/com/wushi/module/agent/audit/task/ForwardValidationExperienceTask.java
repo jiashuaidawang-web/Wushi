@@ -69,7 +69,7 @@ public class ForwardValidationExperienceTask implements EngineTask {
                 where w.watch_date <= ?
                   and ifNull(v.judgement_id, '') = ''
                 order by w.trade_date desc
-                limit 200
+                limit 5000
                 """;
         return clickHouseJdbcTemplate.queryForList(sql, Date.valueOf(validationDate)).stream()
                 .map(this::toRequest)

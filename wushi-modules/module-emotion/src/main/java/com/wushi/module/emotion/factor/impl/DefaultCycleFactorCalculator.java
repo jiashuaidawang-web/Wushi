@@ -75,17 +75,17 @@ public class DefaultCycleFactorCalculator extends AbstractFactorCalculator imple
         List<FactorResult> factors = new ArrayList<>();
         String sourceKey = "tradeDate=" + request.getTradeDate();
         factors.add(buildFactor(request, "CYCLE_LIMIT_UP_COUNT", "涨停家数", limitUpCount, SOURCE_LIMIT_STATUS, sourceKey,
-                "全市场涨停家数衡量短线情绪热度与赚钱效应外溢。"));
+                "全市场涨停家数，衡量情绪热度和赚钱效应外溢。"));
         factors.add(buildFactor(request, "CYCLE_LIMIT_DOWN_COUNT", "跌停家数", limitDownCount, SOURCE_LIMIT_STATUS, sourceKey,
-                "跌停家数越低，说明亏钱效应越可控；若超过阈值，周期判断必须提高风险权重。"));
+                "全市场跌停家数，衡量亏钱效应和退潮压力。"));
         factors.add(buildFactor(request, "CYCLE_BROKEN_LIMIT_COUNT", "炸板家数", brokenLimitCount, SOURCE_LIMIT_STATUS, sourceKey,
-                "炸板家数体现分歧与承接失败，过高时说明修复或主升的一致性不足。"));
+                "全市场炸板数量，衡量分歧和承接失败。"));
         factors.add(buildFactor(request, "CYCLE_MONEY_EFFECT_SCORE", "赚钱效应", moneyEffectScore, SOURCE_BREADTH, sourceKey,
-                "赚钱效应来自涨停、上涨家数、强势延续，是判断修复和扩散的核心证据。"));
+                "由涨停、上涨家数、强势股延续性等合成的赚钱效应评分。"));
         factors.add(buildFactor(request, "CYCLE_LOSS_EFFECT_SCORE", "亏钱效应", lossEffectScore, SOURCE_BREADTH, sourceKey,
-                "亏钱效应用于识别假修复、退潮杀跌和高位负反馈是否扩散。"));
+                "由跌停、破位、高位杀跌和连续亏损样本合成的亏钱效应评分。"));
         factors.add(buildFactor(request, "CYCLE_ABOVE_MA20_RATIO", "20日线以上比例", aboveMa20Ratio, SOURCE_BREADTH, sourceKey,
-                "20日线以上比例衡量市场基础宽度，决定题材行情是否有足够土壤。"));
+                "全市场处于 20 日线以上股票比例，衡量市场基础宽度。"));
 
         return assemble(CALCULATOR_CODE, request.getRuleContext(), factors);
     }

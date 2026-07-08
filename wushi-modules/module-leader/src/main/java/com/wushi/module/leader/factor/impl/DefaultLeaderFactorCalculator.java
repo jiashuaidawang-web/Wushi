@@ -84,17 +84,17 @@ public class DefaultLeaderFactorCalculator extends AbstractFactorCalculator impl
 
         List<FactorResult> factors = new ArrayList<>();
         factors.add(buildFactor(request, "LEADER_POSITION_SCORE", "龙头地位评分", position, SOURCE_LIMIT, sourceKey,
-                "综合空间高度、人气、带动性、分歧修复和被挑战风险，表达该股是否正在竞争龙头地位。"));
+                "个股在空间、辨识度、人气、唯一性上的综合地位。"));
         factors.add(buildFactor(request, "LEADER_CONSECUTIVE_LIMIT_DAYS", "连板高度", consecutiveLimitDays, SOURCE_LIMIT, sourceKey,
-                "连续涨停天数是短线情绪空间锚，代表市场愿意给该股接力的高度。"));
+                "个股连续涨停高度，是短线情绪空间锚。"));
         factors.add(buildFactor(request, "LEADER_DRIVE_SCORE", "带动性", drive, SOURCE_PLATE, sourceKey,
-                "带动性由所属板块涨停家数、梯队完整度、领涨股匹配关系和板块上涨宽度估算。"));
+                "龙头涨停或修复后对板块跟涨、涨停和回封的带动程度。"));
         factors.add(buildFactor(request, "LEADER_POPULARITY_SCORE", "人气强度", popularity, SOURCE_KLINE, sourceKey,
-                "人气强度由成交额、换手、涨幅、封单金额和连板高度合成，衡量资金关注度和接力热度。"));
+                "热度、成交、换手、关注度等合成的人气评分。"));
         factors.add(buildFactor(request, "LEADER_DIVERGENCE_REPAIR", "分歧修复", divergenceRepair, SOURCE_EVENT, sourceKey,
-                "分歧修复优先读取盘中开板/回封事件；缺失事件时使用开板次数、封单和涨停状态做日线代理。"));
+                "龙头在分歧后回封、弱转强或承接修复的质量。"));
         factors.add(buildFactor(request, "LEADER_CHALLENGE_RISK", "被挑战风险", challengeRisk, SOURCE_RELATION, sourceKey,
-                "被挑战风险衡量同板块是否存在高度、带动性或人气接近甚至超过当前候选的竞争者。"));
+                "同板块或跨板块候选龙头对当前龙头地位的挑战强度。"));
 
         return assemble(CALCULATOR_CODE, request.getRuleContext(), factors);
     }
@@ -144,14 +144,14 @@ public class DefaultLeaderFactorCalculator extends AbstractFactorCalculator impl
         BigDecimal heightScore = cap(defaultZero(consecutiveLimitDays).divide(new BigDecimal("6"), 4, RoundingMode.HALF_UP));
         BigDecimal statusScore = isLimitUp(facts.limitRow()) ? BigDecimal.ONE : isBrokenLimit(facts.limitRow()) ? new BigDecimal("0.3000") : ZERO;
         BigDecimal leaderMatch = isPlateLeader(facts) ? BigDecimal.ONE : ZERO;
-        BigDecimal base = heightScore.multiply(new BigDecimal("0.3200"))
-                .add(defaultZero(popularity).multiply(new BigDecimal("0.1800")))
-                .add(defaultZero(drive).multiply(new BigDecimal("0.2000")))
-                .add(defaultZero(divergenceRepair).multiply(new BigDecimal("0.1700")))
-                .add(statusScore.multiply(new BigDecimal("0.0800")))
-                .add(leaderMatch.multiply(new BigDecimal("0.0500")))
-                .subtract(defaultZero(challengeRisk).multiply(new BigDecimal("0.1500")));
-        return cap(base);
+        BigDecimal base = heightScore.multiply(new BigDecimal("0.3000"))
+                .add(defaultZero(popularity).multiply(new BigDecimal("0.2000")))
+                .add(defaultZero(drive).multiply(new BigDecimal("0.2200")))
+                .add(defaultZero(divergenceRepair).multiply(new BigDecimal("0.1800")))
+                .add(statusScore.multiply(new BigDecimal("0.0500")))
+                .add(leaderMatch.multiply(new BigDecimal("0.0500")));
+        BigDecimal challengeDampen = BigDecimal.ONE.subtract(defaultZero(challengeRisk).multiply(new BigDecimal("0.4000")));
+        return cap(base.multiply(challengeDampen));
     }
 
     private BigDecimal resolvePopularity(CandidateFacts facts) {

@@ -72,15 +72,15 @@ public class DefaultRiskFactorCalculator extends AbstractFactorCalculator implem
 
         return assemble(CALCULATOR_CODE, request.getRuleContext(), List.of(
                 buildFactor(request, "RISK_HIGH_POSITION_FEEDBACK", "高位负反馈", highFeedback, "high_position_feedback_daily", sourceKey,
-                        "统计高位跌停、大阴、断板后无修复和高位炸板失败，衡量退潮压力。"),
+                        "高位股跌停、大阴、断板后 A 杀等负反馈。"),
                 buildFactor(request, "RISK_BROKEN_LIMIT_RATE", "炸板率", brokenRate, "stock_limit_status_daily", sourceKey,
-                        "用炸板/开板失败占冲板样本比例判断短线承接是否脆弱。"),
+                        "炸板数量占冲板数量比例，衡量短线承接脆弱度。"),
                 buildFactor(request, "RISK_LOSS_SPREAD", "亏钱效应扩散", lossSpread, "market_breadth_daily_snapshot", sourceKey,
-                        "由市场亏钱效应、跌停扩散和下跌家数占比衡量亏钱效应是否外溢。"),
+                        "亏钱样本从局部高位向中低位和后排扩散的程度。"),
                 buildFactor(request, "RISK_LEADER_FAIL", "龙头失败", leaderFail, "stock_limit_status_daily", sourceKey,
-                        "高位核心断板、炸板或跌停且缺少修复时，视为龙头失败风险。"),
+                        "核心龙头断板后无法修复、带崩板块或情绪空间。"),
                 buildFactor(request, "RISK_PLATE_LOSS", "板块失速", plateLoss, "plate_daily_snapshot", sourceKey,
-                        "板块涨停减少、炸板/跌停增加、资金流出和中位数走弱形成板块失速风险。")
+                        "主线板块涨停减少、梯队断裂、资金流出和后排亏钱同步出现。")
         ));
     }
 

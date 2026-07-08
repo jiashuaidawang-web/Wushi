@@ -80,19 +80,19 @@ public class DefaultMainlineFactorCalculator extends AbstractFactorCalculator im
 
         List<FactorResult> factors = new ArrayList<>();
         factors.add(buildFactor(request, "MAINLINE_ACTIVE_DAYS", "连续活跃天数", activeDays, SOURCE_PLATE, sourceKey,
-                "现有事实表尚未提供真实连续活跃天数，本因子优先读取 active_days；缺失时使用持续性评分换算为活跃天数代理，用于识别题材是否从脉冲走向持续。"));
+                "板块连续进入活跃名单的交易日数量，识别是否从题材脉冲走向主线。"));
         factors.add(buildFactor(request, "MAINLINE_LIMIT_UP_COUNT", "板块涨停家数", limitUpCount, SOURCE_PLATE, sourceKey,
-                "板块涨停家数衡量主线情绪强度，主线不是第一天涨得多，而是能持续吸引资金接力。"));
+                "板块内涨停家数，衡量主线情绪强度。"));
         factors.add(buildFactor(request, "MAINLINE_LADDER_INTEGRITY", "梯队完整度", ladderIntegrity, SOURCE_PLATE, sourceKey,
-                "梯队完整度衡量首板、二板、中高位是否形成结构，是主线确认的重要证据。"));
+                "板块内首板、二板、中高位梯队是否完整，衡量主线结构。"));
         factors.add(buildFactor(request, "MAINLINE_LEADER_QUALITY", "龙头质量", leaderQuality, SOURCE_PLATE, sourceKey,
-                "当前用板块领涨股存在性、梯队完整度和涨停强度估算龙头质量；后续接入龙头竞争快照后替换为真实龙头质量分。"));
+                "主线龙头的空间高度、封单、回封、辨识度和带动性综合评分。"));
         factors.add(buildFactor(request, "MAINLINE_MIDDLE_ARMY_SUPPORT", "中军承接", middleArmySupport, SOURCE_PLATE, sourceKey,
-                "中军承接用板块成交额与上涨家数比例估算，表达资金是否只做小票情绪，还是有容量承接。"));
+                "板块中军成交额、趋势承接和大市值稳定性，衡量主线容量。"));
         factors.add(buildFactor(request, "MAINLINE_REAR_RISK", "后排风险", rearRisk, SOURCE_PLATE, sourceKey,
-                "后排风险由炸板、跌停相对涨停冲板结构计算，风险越低越支持主线从分歧走向确认。"));
+                "后排炸板、冲高回落和亏钱扩散，衡量主线分歧隐患。"));
         factors.add(buildFactor(request, "MAINLINE_CAPITAL_INFLOW", "主力净流入", capitalInflow, SOURCE_CAPITAL, sourceKey,
-                "主力净流入衡量资金是否愿意持续聚焦该板块，是主线合力的重要辅助证据。"));
+                "板块主力净流入强度，辅助确认资金是否愿意持续聚焦。"));
 
         return assemble(CALCULATOR_CODE, request.getRuleContext(), factors);
     }

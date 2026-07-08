@@ -754,6 +754,51 @@ th {
   line-height: 1.5;
 }
 
+.history-replay {
+  display: grid;
+  gap: 12px;
+}
+
+.history-replay-toolbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 160px)) minmax(120px, 140px) auto minmax(160px, 1fr);
+  gap: 8px;
+  align-items: end;
+}
+
+.history-replay-toolbar label {
+  display: grid;
+  gap: 4px;
+}
+
+.history-replay-toolbar span {
+  color: #667386;
+  font-size: 12px;
+}
+
+.history-replay-toolbar input {
+  height: 36px;
+  border: 1px solid #d5dce5;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #1f2733;
+  padding: 0 10px;
+  min-width: 0;
+}
+
+.history-replay-toolbar .checkbox-label {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-replay-toolbar .checkbox-label input {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+}
+
 .rule-toolbar {
   display: grid;
   grid-template-columns: minmax(130px, 180px) 100px 120px 130px auto 38px minmax(140px, 1fr);
@@ -1060,6 +1105,10 @@ th {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .history-replay-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .rule-status-row,
   .rule-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1081,6 +1130,7 @@ th {
   .status-strip,
   .summary-grid,
   .form-grid,
+  .history-replay-toolbar,
   .rule-toolbar,
   .rule-status-row,
   .rule-metrics,

@@ -6,7 +6,7 @@ spring:
     name: wushi
   datasource:
     mysql:
-      jdbc-url: jdbc:mysql://124.223.220.245:3306/wushi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      jdbc-url: jdbc:mysql://124.223.220.245:3306/wusi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       username: root
       password: astock_root
       driver-class-name: com.mysql.cj.jdbc.Driver

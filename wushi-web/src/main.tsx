@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import "./styles.css";
 
-type ApiResponse<T> = { code?: string; message?: string; data: T };
+type ApiResponse<T> = { success?: boolean; code?: string; message?: string; data: T };
 type Query = {
   tradeDate?: string;
   asOfDate?: string;
@@ -143,6 +143,29 @@ type RuleCandidate = {
   approvedAt?: string;
   effectiveAt?: string;
   factorChanges?: Record<string, unknown>[];
+};
+
+type HistoryReplayDay = {
+  tradeDate?: string;
+  asOfDate?: string;
+  batchId?: string;
+  status?: string;
+  affectedRows?: number;
+  errorMessage?: string;
+  stepResults?: Record<string, unknown>[];
+};
+
+type HistoryReplayResult = {
+  batchId?: string;
+  startDate?: string;
+  endDate?: string;
+  ruleVersion?: string;
+  judgementMode?: string;
+  totalDays?: number;
+  successDays?: number;
+  failedDays?: number;
+  affectedRows?: number;
+  days?: HistoryReplayDay[];
 };
 
 type PageKey = "overview" | "cycle" | "mainline" | "leader" | "pattern" | "risk" | "watch" | "review" | "growth";
@@ -463,6 +486,7 @@ function GrowthPage({
         <DataPanel title="因子奖惩" rows={data.factorResults ?? []} columns={["factorCode", "engineType", "sampleCount", "hitRate", "avgContributionScore", "suggestedAction"]} />
         <DataPanel title="组合表现" rows={data.combinationResults ?? []} columns={["combinationCode", "sampleCount", "hitRate", "avgForwardReturn", "avgDrawdown", "suggestedAction"]} />
       </section>
+      <HistoryReplayPanel query={query} />
       <RuleEvolutionPanel query={query} candidateApi={ruleCandidateApi} />
       <section className="panel">
         <PanelTitle icon={Sparkles} title="成长日志" />
@@ -471,6 +495,72 @@ function GrowthPage({
         </div>
       </section>
     </div>
+  );
+}
+
+function HistoryReplayPanel({ query }: { query: Query }) {
+  const [startDate, setStartDate] = useState(query.tradeDate || "");
+  const [endDate, setEndDate] = useState(query.asOfDate || query.tradeDate || "");
+  const [continueOnError, setContinueOnError] = useState(true);
+  const [maxDays, setMaxDays] = useState(366);
+  const [status, setStatus] = useState("");
+  const [result, setResult] = useState<HistoryReplayResult | null>(null);
+
+  async function runReplay() {
+    setStatus("历史回放运行中");
+    try {
+      const response = await postJson("/api/batch/history-replay", {
+        startDate,
+        endDate,
+        ruleVersion: query.ruleVersion,
+        judgementMode: "RETROSPECTIVE",
+        continueOnError,
+        maxDays
+      });
+      const data = (response as ApiResponse<HistoryReplayResult>).data;
+      setResult(data);
+      setStatus(`已完成 ${display(data.successDays)} / ${display(data.totalDays)} 天`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  const dayRows = result?.days ?? [];
+  return (
+    <section className="panel history-replay">
+      <PanelTitle icon={CalendarClock} title="历史批量回放" right={result?.batchId ?? "未运行"} />
+      <div className="history-replay-toolbar">
+        <label>
+          <span>开始日期</span>
+          <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+        </label>
+        <label>
+          <span>结束日期</span>
+          <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+        </label>
+        <label>
+          <span>最大天数</span>
+          <input type="number" min={1} value={maxDays} onChange={(event) => setMaxDays(Number(event.target.value || 1))} />
+        </label>
+        <label className="checkbox-label">
+          <input type="checkbox" checked={continueOnError} onChange={(event) => setContinueOnError(event.target.checked)} />
+          <span>失败后继续</span>
+        </label>
+        <button className="primary" onClick={runReplay} disabled={!startDate || !endDate}>运行完整链路</button>
+        <p className="form-status">{status}</p>
+      </div>
+      {result && (
+        <>
+          <div className="rule-metrics">
+            <MetricCard label="回放天数" value={display(result.totalDays)} sub={`${display(result.startDate)} 至 ${display(result.endDate)}`} />
+            <MetricCard label="成功天数" value={display(result.successDays)} sub="完整链路成功" />
+            <MetricCard label="失败天数" value={display(result.failedDays)} sub="数据缺失或任务异常" tone="red" />
+            <MetricCard label="沉淀行数" value={display(result.affectedRows)} sub="证据、验证点和经验样本" />
+          </div>
+          <DataPanel title="每日回放结果" rows={dayRows as unknown as Record<string, unknown>[]} columns={["tradeDate", "status", "batchId", "affectedRows", "errorMessage"]} />
+        </>
+      )}
+    </section>
   );
 }
 
@@ -1039,8 +1129,8 @@ function useApi<T>(endpoint: string, query: Query, enabled = true) {
     setLoading(true);
     setError("");
     fetch(`${API_BASE}${endpoint}?${params.toString()}`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(response.statusText)))
-      .then((json: ApiResponse<T>) => setData(json.data))
+      .then((response) => readApiResponse<T>(response))
+      .then((json) => setData(json.data))
       .catch((reason) => {
         if (reason instanceof DOMException && reason.name === "AbortError") return;
         setError(reason instanceof Error ? reason.message : String(reason));
@@ -1057,10 +1147,26 @@ async function postJson(endpoint: string, body: unknown) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
-  if (!response.ok) {
-    throw new Error(response.statusText);
+  return readApiResponse<unknown>(response);
+}
+
+async function readApiResponse<T>(response: Response): Promise<ApiResponse<T>> {
+  const text = await response.text();
+  let json: ApiResponse<T> | null = null;
+  if (text) {
+    try {
+      json = JSON.parse(text) as ApiResponse<T>;
+    } catch {
+      json = null;
+    }
   }
-  return response.json();
+  if (!response.ok) {
+    throw new Error(json?.message || response.statusText || `HTTP ${response.status}`);
+  }
+  if (json && json.success === false) {
+    throw new Error(`${json.code ?? "ERROR"}: ${json.message ?? "请求失败"}`);
+  }
+  return json ?? ({ success: true, code: "OK", message: "success", data: undefined as T });
 }
 
 function blockByEngine(context: InferenceContext, engineType: string): JudgmentBlock | undefined {

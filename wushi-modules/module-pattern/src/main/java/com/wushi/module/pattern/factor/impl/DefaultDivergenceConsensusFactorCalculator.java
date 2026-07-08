@@ -88,21 +88,21 @@ public class DefaultDivergenceConsensusFactorCalculator extends AbstractFactorCa
 
         List<FactorResult> factors = new ArrayList<>();
         factors.add(buildFactor(request, "PATTERN_DIVERGENCE_SCORE", "分歧强度", divergence, SOURCE_EVENT, sourceKey,
-                "由炸板率、开板事件、换手放大和高位负反馈合成，衡量市场是否进入分歧考验。"));
+                "炸板、开板、换手放大、后排掉队形成的分歧强度。"));
         factors.add(buildFactor(request, "PATTERN_CONSENSUS_SCORE", "一致强度", consensus, SOURCE_PLATE, sourceKey,
-                "由回封质量、后排承接、缩量加速和风险收敛合成，衡量分歧后是否重新形成合力。"));
+                "板块内龙头、中军、后排同步修复形成的一致强度。"));
         factors.add(buildFactor(request, "PATTERN_REFILL_QUALITY", "回封质量", refillQuality, SOURCE_EVENT, sourceKey,
-                "统计开板后回封比例、回封速度和回封时封单恢复，识别分歧是否被资金接住。"));
+                "开板后的回封速度、封单恢复、回封后稳定性。"));
         factors.add(buildFactor(request, "PATTERN_BROKEN_LIMIT_RISK", "炸板风险", brokenLimitRisk, SOURCE_LIMIT, sourceKey,
-                "用炸板数量、开板次数和板块/全市场涨停承接比例衡量一致失败风险。"));
+                "炸板率和炸板后回落幅度，衡量一致失败风险。"));
         factors.add(buildFactor(request, "PATTERN_REAR_FEEDBACK", "后排反馈", rearFeedback, SOURCE_PLATE, sourceKey,
-                "观察后排上涨宽度、涨停扩散、跌停约束和板块中位数表现，验证主线分歧是否被承接。"));
+                "后排是否修复、是否继续补涨，验证主线分歧是否被承接。"));
         factors.add(buildFactor(request, "PATTERN_TURNOVER_ACCEPTANCE", "换手承接", turnoverAcceptance, SOURCE_KLINE, sourceKey,
-                "用候选范围内换手率、成交额和振幅识别分歧中的真实承接，而不是单纯缩量锁死。"));
+                "分歧时成交额、换手率和振幅是否表现为良性承接，而不是失控抛压。"));
         factors.add(buildFactor(request, "PATTERN_SHRINK_ACCELERATION", "缩量加速", shrinkAcceleration, SOURCE_KLINE, sourceKey,
-                "用涨停封单、开板次数、成交缩量和涨幅强度识别一致阶段的加速程度。"));
+                "封单稳定、开板少、成交缩量且涨幅保持强势，衡量一致阶段加速程度。"));
         factors.add(buildFactor(request, "PATTERN_HIGH_POSITION_FEEDBACK", "高位反馈", highPositionFeedback, SOURCE_HIGH_POSITION, sourceKey,
-                "统计高位断板、大阴、跌停、炸板失败等负反馈，判断分歧是否会兑现为退潮风险。"));
+                "高位断板、大阴、跌停和炸板失败等负反馈，判断分歧是否兑现为退潮。"));
 
         return assemble(CALCULATOR_CODE, request.getRuleContext(), factors);
     }
