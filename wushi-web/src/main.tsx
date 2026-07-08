@@ -8,6 +8,7 @@ import {
   Brain,
   CalendarClock,
   ChevronRight,
+  Clock,
   CircleDot,
   GitBranch,
   LineChart,
@@ -196,7 +197,7 @@ type HistoryReplayResult = {
   days?: HistoryReplayDay[];
 };
 
-type PageKey = "overview" | "cycle" | "mainline" | "leader" | "pattern" | "risk" | "watch" | "review" | "growth";
+type PageKey = "overview" | "cycle" | "mainline" | "leader" | "pattern" | "risk" | "watch" | "review" | "growth" | "history";
 type PageDef = {
   key: PageKey;
   label: string;
@@ -226,7 +227,8 @@ const pages: PageDef[] = [
   { key: "risk", label: "风险雷达", icon: ShieldAlert },
   { key: "watch", label: "明日验证", icon: ListChecks },
   { key: "review", label: "复盘修正", icon: Wrench },
-  { key: "growth", label: "系统成长", icon: Brain }
+  { key: "growth", label: "系统成长", icon: Brain },
+  { key: "history", label: "历史回放", icon: Clock }
 ];
 
 function App() {
@@ -329,6 +331,7 @@ function PageContent({
   if (page === "risk") return <RiskPage query={query} />;
   if (page === "watch") return <WatchPage query={query} />;
   if (page === "review") return <ReviewPage query={query} />;
+  if (page === "history") return <HistoryPage query={query} />;
   return <GrowthPage growthApi={growthApi} ruleCandidateApi={ruleCandidateApi} query={query} />;
 }
 
@@ -341,16 +344,17 @@ function OverviewPage({ query }: { query: Query }) {
   return (
     <div className="page-stack">
       <Hero overview={data} />
+      <DataHealthCard />
       <section className="layout-2">
-        <JudgmentPanel title="周期卡" block={data.cycleCard} accent="blue" />
-        <JudgmentPanel title="风险卡" block={data.riskCard} accent="red" />
+        <div><DataQualityBanner block={data.cycleCard} /><JudgmentPanel title="周期卡" block={data.cycleCard} accent="blue" /></div>
+        <div><DataQualityBanner block={data.riskCard} /><JudgmentPanel title="风险卡" block={data.riskCard} accent="red" /></div>
       </section>
       <section className="layout-2">
         <CandidateBoard title="主线候选" blocks={data.mainlineCards ?? []} kind="mainline" />
         <CandidateBoard title="龙头候选" blocks={data.leaderCards ?? []} kind="leader" />
       </section>
       <section className="layout-2">
-        <JudgmentPanel title="分歧一致" block={data.divergenceCard} accent="amber" />
+        <div><DataQualityBanner block={data.divergenceCard} /><JudgmentPanel title="分歧一致" block={data.divergenceCard} accent="amber" /></div>
         <WatchPanel items={data.nextWatchList ?? []} compact />
       </section>
     </div>
@@ -375,7 +379,7 @@ function CyclePage({ query }: { query: Query }) {
       </section>
       <ChainSummary summary={data.cyclePathSummary} />
       <section className="layout-2">
-        <JudgmentPanel title="周期判断证据" block={block} accent="blue" />
+        <div><DataQualityBanner block={block} /><JudgmentPanel title="周期判断证据" block={block} accent="blue" /></div>
         <FactorTable title="周期因子" factors={arrayOf(detail.factorResults)} />
       </section>
     </div>
@@ -392,10 +396,10 @@ function MainlinePage({ query }: { query: Query }) {
     <div className="page-stack">
       <SectionIntro icon={GitBranch} title="主线推演" desc="主线不是涨得多，而是资金、情绪、题材持续形成合力。" />
       <ChainSummary summary={data.competitionSummary} />
-      <CandidateBoard title="主线候选排序" blocks={data.mainlineJudgements ?? []} kind="mainline" expanded />
+      <CandidateBoard title="主线候选排序" blocks={data.mainlineJudgements ?? []} kind="mainline" expanded renderBanner />
       <section className="layout-2">
         {(data.mainlineJudgements ?? []).slice(0, 2).map((block, index) => (
-          <LifecyclePanel key={index} block={block} index={index + 1} />
+          <div key={index}><DataQualityBanner block={block} /><LifecyclePanel block={block} index={index + 1} /></div>
         ))}
       </section>
     </div>
@@ -412,10 +416,10 @@ function LeaderPage({ query }: { query: Query }) {
     <div className="page-stack">
       <SectionIntro icon={Swords} title="龙头竞争" desc="龙头不是预测出来的，是在主线和周期边界里竞争出来的。" />
       <ChainSummary summary={data.competitionSummary} />
-      <CandidateBoard title="龙头候选池" blocks={data.leaderJudgements ?? []} kind="leader" expanded />
+      <CandidateBoard title="龙头候选池" blocks={data.leaderJudgements ?? []} kind="leader" expanded renderBanner />
       <section className="layout-2">
         {(data.leaderJudgements ?? []).slice(0, 2).map((block, index) => (
-          <JudgmentPanel key={index} title={`竞争详情 ${index + 1}`} block={block} accent={index === 0 ? "green" : "gray"} />
+          <div key={index}><DataQualityBanner block={block} /><JudgmentPanel title={`竞争详情 ${index + 1}`} block={block} accent={index === 0 ? "green" : "gray"} /></div>
         ))}
       </section>
     </div>
@@ -441,7 +445,7 @@ function PatternPage({ query }: { query: Query }) {
       </section>
       <ChainSummary summary={data.confirmationSummary} />
       <section className="layout-2">
-        <JudgmentPanel title="分歧一致判断" block={block} accent="amber" />
+        <div><DataQualityBanner block={block} /><JudgmentPanel title="分歧一致判断" block={block} accent="amber" /></div>
         <FactorTable title="模式因子" factors={arrayOf(detail.factorResults)} />
       </section>
     </div>
@@ -466,7 +470,7 @@ function RiskPage({ query }: { query: Query }) {
         <MetricCard label="降险信号" value={display(detail.reduceRiskSignal)} sub="等待风险兑现或收敛" />
       </section>
       <ChainSummary summary={data.riskSummary} />
-      <JudgmentPanel title="风险证据链" block={block} accent="red" />
+      <div><DataQualityBanner block={block} /><JudgmentPanel title="风险证据链" block={block} accent="red" /></div>
     </div>
   );
 }
@@ -550,6 +554,294 @@ function GrowthPage({
   );
 }
 
+
+type BatchHistoryRecord = {
+  tradeDate: string;
+  batchId: string;
+  ruleVersion?: string;
+  engineType?: string;
+  totalSteps: number;
+  completedSteps: number;
+  status: "SUCCESS" | "FAILED" | "RUNNING" | "PARTIAL";
+  startTime: string;
+  endTime?: string;
+  duration?: number;
+  affectedRows?: number;
+  errorMessage?: string;
+  stepResults?: { step: string; status: string; message?: string }[];
+};
+
+function HistoryPage({ query }: { query: Query }) {
+  const [records, setRecords] = useState<BatchHistoryRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [tick, setTick] = useState(0);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    const params = new URLSearchParams();
+    if (query.tradeDate) params.set("tradeDate", query.tradeDate);
+    if (query.ruleVersion) params.set("ruleVersion", query.ruleVersion);
+    fetch(`${API_BASE}/api/rule/batch-history?${params.toString()}`)
+      .then((res) => readApiResponse<BatchHistoryRecord[]>(res))
+      .then((json) => {
+        if (cancelled) return;
+        setRecords(json.data ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setRecords(buildMockHistory());
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [query.tradeDate, query.ruleVersion, tick]);
+
+  // Auto-refresh if any RUNNING batch
+  useEffect(() => {
+    const hasRunning = records.some((r) => r.status === "RUNNING");
+    if (!hasRunning) return;
+    const id = setInterval(() => setTick((t) => t + 1), 3000);
+    return () => clearInterval(id);
+  }, [records]);
+
+  if (loading) return <State loading error="" reload={() => setTick((t) => t + 1)} />;
+  if (error) return <State loading={false} error={error} reload={() => setTick((t) => t + 1)} />;
+
+  const successCount = records.filter((r) => r.status === "SUCCESS").length;
+  const failedCount = records.filter((r) => r.status === "FAILED").length;
+  const runningCount = records.filter((r) => r.status === "RUNNING").length;
+
+  return (
+    <div className="page-stack">
+      <SectionIntro icon={Clock} title="历史回放记录" desc="查看每日跑批的执行状态、进度与失败日志。" />
+      <section className="layout-4">
+        <MetricCard label="总批次数" value={String(records.length)} sub="所有跑批任务" />
+        <MetricCard label="成功" value={String(successCount)} sub="完整链路成功" />
+        <MetricCard label="失败" value={String(failedCount)} sub="数据缺失或异常" tone="red" />
+        <MetricCard label="运行中" value={String(runningCount)} sub="处理中…" />
+      </section>
+
+      <section className="panel">
+        <PanelTitle
+          icon={ListChecks}
+          title="跑批记录列表"
+          right={
+            <button className="icon-button" onClick={() => setTick((t) => t + 1)} title="刷新">
+              <RefreshCw size={15} />
+            </button>
+          }
+        />
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>交易日</th>
+                <th>批次号</th>
+                <th>规则版本</th>
+                <th>引擎</th>
+                <th>进度</th>
+                <th>状态</th>
+                <th>耗时</th>
+                <th>沉淀行数</th>
+                <th>日志</th>
+              </tr>
+            </thead>
+            <tbody>
+              {records.map((rec) => {
+                const pct = rec.totalSteps > 0 ? Math.round((rec.completedSteps / rec.totalSteps) * 100) : 0;
+                return (
+                  <tr key={rec.batchId}>
+                    <td>{display(rec.tradeDate)}</td>
+                    <td><code>{display(rec.batchId)}</code></td>
+                    <td>{display(rec.ruleVersion)}</td>
+                    <td>{display(rec.engineType)}</td>
+                    <td style={{ minWidth: 140 }}>
+                      <div className="progress-cell">
+                        <div className="progress-track">
+                          <div className={`progress-fill status-${rec.status.toLowerCase()}`} style={{ width: `${pct}%` }} />
+                        </div>
+                        <small>{rec.completedSteps}/{rec.totalSteps} ({pct}%)</small>
+                      </div>
+                    </td>
+                    <td><StatusBadge status={rec.status} /></td>
+                    <td>{rec.duration != null ? `${(rec.duration / 1000).toFixed(1)}s` : "--"}</td>
+                    <td>{rec.affectedRows != null ? display(rec.affectedRows) : "--"}</td>
+                    <td>
+                      {(rec.errorMessage || (rec.stepResults && rec.stepResults.length)) ? (
+                        <button className="icon-button" onClick={() => setExpanded(expanded === rec.batchId ? null : rec.batchId)} title="查看日志">
+                          <ChevronRight size={16} />
+                        </button>
+                      ) : "--"}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!records.length && (
+                <tr><td colSpan={9}><Empty /></td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {expanded && (() => {
+        const rec = records.find((r) => r.batchId === expanded);
+        if (!rec) return null;
+        return (
+          <section className="panel">
+            <PanelTitle icon={AlertTriangle} title={`日志 — ${rec.batchId}`} />
+            {rec.errorMessage ? (
+              <pre className="error-log">{rec.errorMessage}</pre>
+            ) : null}
+            {rec.stepResults && rec.stepResults.length ? (
+              <div className="log-list">
+                {rec.stepResults.map((s, i) => (
+                  <p key={i}><strong>{s.step}</strong> · <StatusBadge status={s.status} />{s.message ? ` — ${s.message}` : ""}</p>
+                ))}
+              </div>
+            ) : null}
+            {!rec.errorMessage && !(rec.stepResults && rec.stepResults.length) ? <Empty /> : null}
+          </section>
+        );
+      })()}
+    </div>
+  );
+}
+
+function buildMockHistory(): BatchHistoryRecord[] {
+  const days = ["2026-07-09", "2026-07-08", "2026-07-07", "2026-07-06", "2026-07-05", "2026-07-04", "2026-07-03"];
+  return days.map((tradeDate, i): BatchHistoryRecord => {
+    const statuses: BatchHistoryRecord["status"][] = ["SUCCESS", "SUCCESS", "FAILED", "RUNNING", "SUCCESS", "PARTIAL", "SUCCESS"];
+    const status = statuses[i] ?? "SUCCESS";
+    const totalSteps = 8;
+    const completedSteps = status === "RUNNING" ? 5 : status === "FAILED" ? 3 : status === "PARTIAL" ? 6 : totalSteps;
+    const duration = status === "RUNNING" ? undefined : (80 + i * 15) * 1000;
+    const affectedRows = status === "SUCCESS" ? 2400 + i * 50 : status === "PARTIAL" ? 1200 : status === "RUNNING" ? 0 : 0;
+    const errorMessage = status === "FAILED"
+      ? `[${tradeDate}] 跑批失败：步骤 4/8「因子计算」异常\n  Caused by: java.net.SocketTimeoutException: Read timed out after 30000ms\n  at com.astock.module.spider.DcApiClient.fetch(DcApiClient.java:156)\n  at com.astock.module.service.BatchRunner.run(BatchRunner.java:89)\n  ✦ 建议：检查数据源连接或增加超时配置`
+      : undefined;
+    const stepResults = status === "FAILED" || status === "PARTIAL" ? [
+      { step: "数据拉取", status: "SUCCESS" },
+      { step: "清洗", status: "SUCCESS" },
+      { step: "特征计算", status: "SUCCESS" },
+      { step: "因子计算", status: i >= 2 ? "FAILED" : "SUCCESS", message: i >= 2 ? "SocketTimeoutException" : undefined },
+      { step: "推理", status: "SUCCESS" },
+      { step: "验证", status: "SUCCESS" },
+      { step: "沉淀", status: status === "PARTIAL" ? "SUCCESS" : "SUCCESS" },
+      { step: "归档", status: "SUCCESS" }
+    ] : undefined;
+    return {
+      tradeDate,
+      batchId: `BATCH-${tradeDate.replace(/-/g, "")}-001`,
+      ruleVersion: "v0.1.0",
+      engineType: "RULE_ENGINE",
+      totalSteps,
+      completedSteps,
+      status,
+      startTime: `${tradeDate} 09:30:00`,
+      endTime: duration !== undefined ? `${tradeDate} 09:${30 + Math.floor((duration / 60000))}:${(duration % 60000 / 1000).toFixed(0).padStart(2, "0")}` : undefined,
+      duration,
+      affectedRows,
+      errorMessage,
+      stepResults
+    };
+  });
+}
+
+
+
+// ---- Data Health Panel (P2-3, MOCK: 等后端就绪替换) ----
+type DataHealthData = {
+  tradeDate: string;
+  crawlCoverage: number;
+  tableCoverage: number;
+  lastUpdate: string;
+};
+
+const MOCK_DATA_HEALTH: DataHealthData = {
+  tradeDate: "2026-07-09",
+  crawlCoverage: 0.92,
+  tableCoverage: 0.88,
+  lastUpdate: "2026-07-09 09:45:32",
+};
+
+function coverageColor(pct: number) {
+  if (pct >= 0.8) return "#16a34a";
+  if (pct >= 0.5) return "#d97706";
+  return "#dc2626";
+}
+
+function DataHealthCard() {
+  const [health, setHealth] = useState<DataHealthData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${API_BASE}/api/market/data-health`)
+      .then((res) => readApiResponse<DataHealthData>(res))
+      .then((json) => setHealth(json.data))
+      .catch(() => setHealth(MOCK_DATA_HEALTH)) // MOCK: 等后端就绪替换
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <section className="panel"><PanelTitle icon={Activity} title="数据健康" /> <Empty /></section>;
+  if (!health) return <section className="panel"><PanelTitle icon={Activity} title="数据健康" /> <Empty /></section>;
+
+  const crawlPct = Math.round(health.crawlCoverage * 100);
+  const tablePct = Math.round(health.tableCoverage * 100);
+
+  return (
+    <section className="panel">
+      <PanelTitle icon={Activity} title="数据健康" right={health.tradeDate} />
+      <div className="health-metrics">
+        <div className="health-item">
+          <span>当日数据抓取覆盖率</span>
+          <div className="health-bar-track">
+            <div className="health-bar-fill" style={{ width: `${crawlPct}%`, background: coverageColor(health.crawlCoverage) }} />
+          </div>
+          <strong style={{ color: coverageColor(health.crawlCoverage) }}>{crawlPct}%</strong>
+        </div>
+        <div className="health-item">
+          <span>表覆盖率</span>
+          <div className="health-bar-track">
+            <div className="health-bar-fill" style={{ width: `${tablePct}%`, background: coverageColor(health.tableCoverage) }} />
+          </div>
+          <strong style={{ color: coverageColor(health.tableCoverage) }}>{tablePct}%</strong>
+        </div>
+        <div className="health-item">
+          <span>最后更新时间</span>
+          <strong>{health.lastUpdate}</strong>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
+// ---- Data Quality Banner (P2) ----
+function DataQualityBanner({ block }: { block?: JudgmentBlock }) {
+  const level = block?.meta?.dataQualityLevel;
+  if (!level) return null;
+  if (level === "L2") {
+    return (
+      <div className="data-quality-banner level-warning">
+        <AlertTriangle size={15} /> ⚠ 数据覆盖率不足，引擎降级运行中
+      </div>
+    );
+  }
+  if (level === "L3") {
+    return (
+      <div className="data-quality-banner level-critical">
+        <AlertTriangle size={15} /> ⛔ 数据严重不足，结果仅供参考
+      </div>
+    );
+  }
+  return null;
+}
 
 // ---- Reusable shared components ----
 
@@ -917,7 +1209,7 @@ function RuleStateFlow({ status }: { status?: string }) {
 
 
 
-function CandidateBoard({ title, blocks, kind, expanded = false }: { title: string; blocks: JudgmentBlock[]; kind: "mainline" | "leader"; expanded?: boolean }) {
+function CandidateBoard({ title, blocks, kind, expanded = false, renderBanner = false }: { title: string; blocks: JudgmentBlock[]; kind: "mainline" | "leader"; expanded?: boolean; renderBanner?: boolean }) {
   return (
     <section className="panel">
       <PanelTitle icon={kind === "mainline" ? GitBranch : Swords} title={title} right={`${blocks.length} 个候选`} />
@@ -931,6 +1223,7 @@ function CandidateBoard({ title, blocks, kind, expanded = false }: { title: stri
             const score = kind === "mainline" ? detail.candidateScore : detail.candidateScore;
             return (
               <article key={`${String(code)}-${index}`} className="candidate-item">
+                {renderBanner && block.meta?.dataQualityLevel && <DataQualityBanner block={block} />}
                 <div className="rank">{index + 1}</div>
                 <div>
                   <h3>{display(name, block.meta?.targetName ?? "候选")}</h3>
@@ -1104,7 +1397,7 @@ function SummaryCell({ label, value }: { label: string; value: string }) {
   return <div><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function PanelTitle({ icon: Icon, title, right }: { icon: typeof Activity; title: string; right?: string }) {
+function PanelTitle({ icon: Icon, title, right }: { icon: typeof Activity; title: string; right?: React.ReactNode }) {
   return (
     <div className="panel-title">
       <h2><Icon size={17} />{title}</h2>
@@ -1243,7 +1536,11 @@ function statusText(status?: string) {
     REJECTED: "已拒绝",
     DRAFT: "草稿",
     ACTIVE: "生效",
-    ARCHIVED: "归档"
+    ARCHIVED: "归档",
+    SUCCESS: "成功",
+    FAILED: "失败",
+    RUNNING: "运行中",
+    PARTIAL: "部分成功"
   };
   return map[String(status ?? "")] ?? display(status, "未知");
 }
