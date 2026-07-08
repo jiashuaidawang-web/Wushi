@@ -8,6 +8,7 @@ import com.wushi.common.enums.TargetType;
 import com.wushi.module.rule.engine.core.EngineRequest;
 import com.wushi.module.rule.support.EngineRequestFactory;
 import com.wushi.module.similarity.engine.HistoricalSimilarityEngine;
+import com.wushi.module.similarity.model.HistoricalSimilarityMatch;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -37,24 +39,36 @@ public class HistoricalSimilarityController {
             @RequestParam(required = false) String targetCode,
             @RequestParam(required = false) String targetName,
             @RequestParam(required = false, defaultValue = "10") Integer limit) {
-        var query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
-        EngineRequest request = engineRequestFactory.create(
-                query.tradeDate(),
-                query.asOfDate(),
-                query.judgementMode(),
-                engineType == null ? EngineType.MARKET_OVERVIEW : engineType,
-                targetType == null ? TargetType.MARKET : targetType,
-                targetCode,
-                targetName,
-                query.ruleVersion(),
-                java.util.List.of("judgement_evidence_item", "historical_similarity_match"),
-                Map.of("limit", Math.min(Math.max(limit == null ? 10 : limit, 1), 50))
-        );
-        var matches = historicalSimilarityEngine.match(request);
-        return ApiResponse.ok(new HistoricalSimilarityVO(
-                query,
-                matches,
-                matches.isEmpty() ? "未找到足够相似样本，等待更多判断证据和后验表现沉淀" : "已按周期/主线/龙头/分歧/风险结构匹配历史样本"
-        ));
+        try {
+            var query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
+            EngineRequest request = engineRequestFactory.create(
+                    query.tradeDate(),
+                    query.asOfDate(),
+                    query.judgementMode(),
+                    engineType == null ? EngineType.MARKET_OVERVIEW : engineType,
+                    targetType == null ? TargetType.MARKET : targetType,
+                    targetCode,
+                    targetName,
+                    query.ruleVersion(),
+                    java.util.List.of("judgement_evidence_item", "historical_similarity_match"),
+                    Map.of("limit", Math.min(Math.max(limit == null ? 10 : limit, 1), 50))
+            );
+            var matches = historicalSimilarityEngine.match(request);
+            if (matches == null) {
+                matches = List.of();
+            }
+            return ApiResponse.ok(new HistoricalSimilarityVO(
+                    query,
+                    matches,
+                    matches.isEmpty() ? "未找到足够相似样本，等待更多判断证据和后验表现沉淀" : "已按周期/主线/龙头/分歧/风险结构匹配历史样本"
+            ));
+        } catch (Exception ex) {
+            var query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
+            return ApiResponse.ok(new HistoricalSimilarityVO(
+                    query,
+                    List.of(),
+                    "历史相似引擎暂不可用：" + ex.getMessage()
+            ));
+        }
     }
 }

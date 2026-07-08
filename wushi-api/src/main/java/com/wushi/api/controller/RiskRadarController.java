@@ -47,21 +47,26 @@ public class RiskRadarController {
             @RequestParam(required = false) String ruleVersion,
             @RequestParam(required = false) String plateCode,
             @RequestParam(required = false) String plateName) {
-        MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
-        EngineRequest request = engineRequestFactory.create(
-                query.tradeDate(),
-                query.asOfDate(),
-                query.judgementMode(),
-                EngineType.RISK,
-                plateCode == null || plateCode.isBlank() ? TargetType.MARKET : TargetType.PLATE,
-                plateCode == null || plateCode.isBlank() ? "MARKET" : plateCode,
-                plateCode == null || plateCode.isBlank() ? "全市场" : plateName,
-                query.ruleVersion(),
-                REQUIRED_TABLES,
-                plateCode == null || plateCode.isBlank() ? Map.of() : Map.of("plateCode", plateCode)
-        );
-        JudgmentBlockVO<RiskRadarDetail> riskCard = judgmentBlockAssembler.toBlock(riskRadarEngine.judge(request));
-        return ApiResponse.ok(new RiskRadarVO(query, List.of(riskCard), buildSummary(riskCard)));
+        try {
+            MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
+            EngineRequest request = engineRequestFactory.create(
+                    query.tradeDate(),
+                    query.asOfDate(),
+                    query.judgementMode(),
+                    EngineType.RISK,
+                    plateCode == null || plateCode.isBlank() ? TargetType.MARKET : TargetType.PLATE,
+                    plateCode == null || plateCode.isBlank() ? "MARKET" : plateCode,
+                    plateCode == null || plateCode.isBlank() ? "全市场" : plateName,
+                    query.ruleVersion(),
+                    REQUIRED_TABLES,
+                    plateCode == null || plateCode.isBlank() ? Map.of() : Map.of("plateCode", plateCode)
+            );
+            JudgmentBlockVO<RiskRadarDetail> riskCard = judgmentBlockAssembler.toBlock(riskRadarEngine.judge(request));
+            return ApiResponse.ok(new RiskRadarVO(query, List.of(riskCard), buildSummary(riskCard)));
+        } catch (Exception ex) {
+            MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
+            return ApiResponse.ok(new RiskRadarVO(query, List.of(), "风险雷达暂不可用：" + ex.getMessage()));
+        }
     }
 
     private String buildSummary(JudgmentBlockVO<RiskRadarDetail> riskCard) {

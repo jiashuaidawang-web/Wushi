@@ -32,10 +32,13 @@ type Query = {
   [key: string]: string | undefined;
 };
 
+// ---- Domain types (aligned with backend VOs) ----
 type EvidenceItem = {
+  evidenceId?: string;
   evidenceCode?: string;
   evidenceType?: string;
   factorCode?: string;
+  factorName?: string;
   title?: string;
   evidenceTitle?: string;
   description?: string;
@@ -88,35 +91,60 @@ type JudgmentBlock = {
   warningList?: EvidenceItem[];
   nextWatchList?: NextWatchItem[];
   dataQualityIssues?: Record<string, unknown>[];
+  forwardValidations?: Record<string, unknown>[];
 };
 
-type ChainNode = {
-  nodeCode?: string;
-  nodeName?: string;
-  targetCode?: string;
-  targetName?: string;
-  conclusion?: string;
-  confidence?: number | string;
-  ruleVersion?: string;
-  evidenceCount?: number;
-  conflictCount?: number;
-  warningCount?: number;
-  nextWatchCount?: number;
+type JudgmentBlockList = {
+  blocks?: JudgmentBlock[];
 };
 
-type InferenceContext = {
+// ---- Page data types ----
+type OverviewData = {
   query?: Query;
-  chain?: Record<string, string | undefined>;
-  chainNodes?: ChainNode[];
   cycleCard?: JudgmentBlock;
   mainlineCards?: JudgmentBlock[];
   leaderCards?: JudgmentBlock[];
   divergenceCard?: JudgmentBlock;
   riskCard?: JudgmentBlock;
-  topMainline?: Record<string, unknown>;
-  topLeader?: Record<string, unknown>;
   nextWatchList?: NextWatchItem[];
   dataQualityIssues?: Record<string, unknown>[];
+};
+
+type CycleData = {
+  query?: Query;
+  cycleJudgement?: JudgmentBlock;
+  cyclePathSummary?: string;
+};
+
+type MainlineData = {
+  query?: Query;
+  mainlineJudgements?: JudgmentBlock[];
+  competitionSummary?: string;
+};
+
+type LeaderData = {
+  query?: Query;
+  leaderJudgements?: JudgmentBlock[];
+  competitionSummary?: string;
+};
+
+type PatternData = {
+  query?: Query;
+  divergenceJudgements?: JudgmentBlock[];
+  confirmationSummary?: string;
+};
+
+type RiskData = {
+  query?: Query;
+  riskJudgements?: JudgmentBlock[];
+  riskSummary?: string;
+};
+
+type ReviewData = {
+  query?: Query;
+  correctionScopes?: string[];
+  pendingReviewItems?: string[];
+  reviewSummary?: string;
 };
 
 type GrowthData = {
@@ -174,12 +202,6 @@ type PageDef = {
   label: string;
   icon: LucideIcon;
 };
-type InferenceApi = {
-  data: InferenceContext | null;
-  loading: boolean;
-  error: string;
-  reload: () => void;
-};
 type GrowthApi = {
   data: GrowthData | null;
   loading: boolean;
@@ -223,7 +245,6 @@ function App() {
     statDate: asOfDate || tradeDate,
     ruleVersion
   }), [asOfDate, tradeDate, ruleVersion]);
-  const contextApi = useApi<InferenceContext>("/api/market/inference-context", query);
   const growthApi = useApi<GrowthData>("/api/system/growth", query, page === "growth");
   const ruleCandidateApi = useApi<RuleCandidate[]>("/api/system/rule-evolution/candidates", ruleCandidateQuery, page === "growth");
 
@@ -275,84 +296,75 @@ function App() {
               <span>规则</span>
               <input value={ruleVersion} onChange={(event) => setRuleVersion(event.target.value)} aria-label="rule version" />
             </label>
-            <button className="icon-button" onClick={contextApi.reload} title="刷新">
-              <RefreshCw size={17} />
-            </button>
           </div>
         </header>
 
-        <RuntimeStatus contextApi={contextApi} />
-
-        {contextApi.loading || contextApi.error || !contextApi.data ? (
-          <State loading={contextApi.loading} error={contextApi.error} reload={contextApi.reload} />
-        ) : (
-          <PageContent page={page} context={contextApi.data} query={query} growthApi={growthApi} ruleCandidateApi={ruleCandidateApi} />
-        )}
+        <PageContent
+          page={page}
+          query={query}
+          growthApi={growthApi}
+          ruleCandidateApi={ruleCandidateApi}
+        />
       </main>
     </div>
   );
 }
 
-function RuntimeStatus({ contextApi }: { contextApi: InferenceApi }) {
-  const context = contextApi.data;
-  return (
-    <section className="status-strip">
-      <StatusPill icon={CalendarClock} label="回放能力" value={context?.query?.tradeDate ? String(context.query.tradeDate) : "默认最近交易日"} />
-      <StatusPill icon={SlidersHorizontal} label="规则版本" value={context?.query?.ruleVersion ?? "v0.1.0"} />
-      <StatusPill icon={BookOpenCheck} label="证据" value={String(totalCount(context?.chainNodes, "evidenceCount"))} />
-      <StatusPill icon={AlertTriangle} label="冲突/预警" value={String(totalCount(context?.chainNodes, "conflictCount") + totalCount(context?.chainNodes, "warningCount"))} />
-      <StatusPill icon={ListChecks} label="待验证" value={String(context?.nextWatchList?.length ?? 0)} />
-    </section>
-  );
-}
-
 function PageContent({
   page,
-  context,
   query,
   growthApi,
   ruleCandidateApi
 }: {
   page: PageKey;
-  context: InferenceContext;
   query: Query;
   growthApi: GrowthApi;
   ruleCandidateApi: RuleCandidateApi;
 }) {
-  if (page === "overview") return <OverviewPage context={context} />;
-  if (page === "cycle") return <CyclePage context={context} />;
-  if (page === "mainline") return <MainlinePage context={context} />;
-  if (page === "leader") return <LeaderPage context={context} />;
-  if (page === "pattern") return <PatternPage context={context} />;
-  if (page === "risk") return <RiskPage context={context} />;
-  if (page === "watch") return <WatchPage context={context} />;
-  if (page === "review") return <ReviewPage context={context} query={query} />;
-  return <GrowthPage growthApi={growthApi} ruleCandidateApi={ruleCandidateApi} context={context} query={query} />;
+  if (page === "overview") return <OverviewPage query={query} />;
+  if (page === "cycle") return <CyclePage query={query} />;
+  if (page === "mainline") return <MainlinePage query={query} />;
+  if (page === "leader") return <LeaderPage query={query} />;
+  if (page === "pattern") return <PatternPage query={query} />;
+  if (page === "risk") return <RiskPage query={query} />;
+  if (page === "watch") return <WatchPage query={query} />;
+  if (page === "review") return <ReviewPage query={query} />;
+  return <GrowthPage growthApi={growthApi} ruleCandidateApi={ruleCandidateApi} query={query} />;
 }
 
-function OverviewPage({ context }: { context: InferenceContext }) {
+function OverviewPage({ query }: { query: Query }) {
+  const api = useApi<OverviewData>("/api/market/overview", query);
+  if (api.loading || api.error || !api.data) {
+    return <State loading={api.loading} error={api.error} reload={api.reload} />;
+  }
+  const data = api.data;
   return (
     <div className="page-stack">
-      <Hero context={context} />
-      <ChainMap nodes={context.chainNodes ?? []} />
+      <Hero overview={data} />
       <section className="layout-2">
-        <JudgmentPanel title="周期卡" block={context.cycleCard} accent="blue" />
-        <JudgmentPanel title="风险卡" block={context.riskCard} accent="red" />
+        <JudgmentPanel title="周期卡" block={data.cycleCard} accent="blue" />
+        <JudgmentPanel title="风险卡" block={data.riskCard} accent="red" />
       </section>
       <section className="layout-2">
-        <CandidateBoard title="主线候选" blocks={context.mainlineCards ?? []} kind="mainline" />
-        <CandidateBoard title="龙头候选" blocks={context.leaderCards ?? []} kind="leader" />
+        <CandidateBoard title="主线候选" blocks={data.mainlineCards ?? []} kind="mainline" />
+        <CandidateBoard title="龙头候选" blocks={data.leaderCards ?? []} kind="leader" />
       </section>
       <section className="layout-2">
-        <JudgmentPanel title="分歧一致" block={context.divergenceCard} accent="amber" />
-        <WatchPanel items={context.nextWatchList ?? []} compact />
+        <JudgmentPanel title="分歧一致" block={data.divergenceCard} accent="amber" />
+        <WatchPanel items={data.nextWatchList ?? []} compact />
       </section>
     </div>
   );
 }
 
-function CyclePage({ context }: { context: InferenceContext }) {
-  const detail = objectOf(context.cycleCard?.detail);
+function CyclePage({ query }: { query: Query }) {
+  const api = useApi<CycleData>("/api/cycle/dashboard", query);
+  if (api.loading || api.error || !api.data) {
+    return <State loading={api.loading} error={api.error} reload={api.reload} />;
+  }
+  const data = api.data;
+  const block = data.cycleJudgement;
+  const detail = objectOf(block?.detail);
   return (
     <div className="page-stack">
       <SectionIntro icon={Activity} title="周期驾驶舱" desc="先判市场处于什么时，再决定允许什么模式、禁止什么动作。" />
@@ -361,21 +373,28 @@ function CyclePage({ context }: { context: InferenceContext }) {
         <MetricCard label="情绪阶段" value={display(detail.emotionCycleStage)} sub={display(detail.transitionSignal)} />
         <MetricCard label="策略边界" value={display(detail.strategyBoundary)} sub={display(detail.allowedMode)} />
       </section>
+      <ChainSummary summary={data.cyclePathSummary} />
       <section className="layout-2">
-        <JudgmentPanel title="周期判断证据" block={context.cycleCard} accent="blue" />
+        <JudgmentPanel title="周期判断证据" block={block} accent="blue" />
         <FactorTable title="周期因子" factors={arrayOf(detail.factorResults)} />
       </section>
     </div>
   );
 }
 
-function MainlinePage({ context }: { context: InferenceContext }) {
+function MainlinePage({ query }: { query: Query }) {
+  const api = useApi<MainlineData>("/api/mainline/dashboard", query);
+  if (api.loading || api.error || !api.data) {
+    return <State loading={api.loading} error={api.error} reload={api.reload} />;
+  }
+  const data = api.data;
   return (
     <div className="page-stack">
       <SectionIntro icon={GitBranch} title="主线推演" desc="主线不是涨得多，而是资金、情绪、题材持续形成合力。" />
-      <CandidateBoard title="主线候选排序" blocks={context.mainlineCards ?? []} kind="mainline" expanded />
+      <ChainSummary summary={data.competitionSummary} />
+      <CandidateBoard title="主线候选排序" blocks={data.mainlineJudgements ?? []} kind="mainline" expanded />
       <section className="layout-2">
-        {(context.mainlineCards ?? []).slice(0, 2).map((block, index) => (
+        {(data.mainlineJudgements ?? []).slice(0, 2).map((block, index) => (
           <LifecyclePanel key={index} block={block} index={index + 1} />
         ))}
       </section>
@@ -383,13 +402,19 @@ function MainlinePage({ context }: { context: InferenceContext }) {
   );
 }
 
-function LeaderPage({ context }: { context: InferenceContext }) {
+function LeaderPage({ query }: { query: Query }) {
+  const api = useApi<LeaderData>("/api/leader/competition", query);
+  if (api.loading || api.error || !api.data) {
+    return <State loading={api.loading} error={api.error} reload={api.reload} />;
+  }
+  const data = api.data;
   return (
     <div className="page-stack">
       <SectionIntro icon={Swords} title="龙头竞争" desc="龙头不是预测出来的，是在主线和周期边界里竞争出来的。" />
-      <CandidateBoard title="龙头候选池" blocks={context.leaderCards ?? []} kind="leader" expanded />
+      <ChainSummary summary={data.competitionSummary} />
+      <CandidateBoard title="龙头候选池" blocks={data.leaderJudgements ?? []} kind="leader" expanded />
       <section className="layout-2">
-        {(context.leaderCards ?? []).slice(0, 2).map((block, index) => (
+        {(data.leaderJudgements ?? []).slice(0, 2).map((block, index) => (
           <JudgmentPanel key={index} title={`竞争详情 ${index + 1}`} block={block} accent={index === 0 ? "green" : "gray"} />
         ))}
       </section>
@@ -397,8 +422,14 @@ function LeaderPage({ context }: { context: InferenceContext }) {
   );
 }
 
-function PatternPage({ context }: { context: InferenceContext }) {
-  const detail = objectOf(context.divergenceCard?.detail);
+function PatternPage({ query }: { query: Query }) {
+  const api = useApi<PatternData>("/api/divergence/dashboard", query);
+  if (api.loading || api.error || !api.data) {
+    return <State loading={api.loading} error={api.error} reload={api.reload} />;
+  }
+  const data = api.data;
+  const block = data.divergenceJudgements?.[0];
+  const detail = objectOf(block?.detail);
   return (
     <div className="page-stack">
       <SectionIntro icon={LineChart} title="分歧一致" desc="只识别主线确认后的健康分歧，不把退潮分歧误当机会。" />
@@ -408,16 +439,23 @@ function PatternPage({ context }: { context: InferenceContext }) {
         <MetricCard label="一致分" value={display(detail.consensusScore)} sub="回封与承接质量" />
         <MetricCard label="失败信号" value={display(detail.failureSignal)} sub={display(detail.patternRisk)} tone="red" />
       </section>
+      <ChainSummary summary={data.confirmationSummary} />
       <section className="layout-2">
-        <JudgmentPanel title="分歧一致判断" block={context.divergenceCard} accent="amber" />
+        <JudgmentPanel title="分歧一致判断" block={block} accent="amber" />
         <FactorTable title="模式因子" factors={arrayOf(detail.factorResults)} />
       </section>
     </div>
   );
 }
 
-function RiskPage({ context }: { context: InferenceContext }) {
-  const detail = objectOf(context.riskCard?.detail);
+function RiskPage({ query }: { query: Query }) {
+  const api = useApi<RiskData>("/api/risk/radar", query);
+  if (api.loading || api.error || !api.data) {
+    return <State loading={api.loading} error={api.error} reload={api.reload} />;
+  }
+  const data = api.data;
+  const block = data.riskJudgements?.[0];
+  const detail = objectOf(block?.detail);
   return (
     <div className="page-stack">
       <SectionIntro icon={ShieldAlert} title="风险雷达" desc="风险不是最后一步，而是贯穿周期、主线、龙头和分歧一致全过程。" />
@@ -427,34 +465,50 @@ function RiskPage({ context }: { context: InferenceContext }) {
         <MetricCard label="高位反馈" value={display(detail.highPositionFeedbackScore)} sub="核心票负反馈" />
         <MetricCard label="降险信号" value={display(detail.reduceRiskSignal)} sub="等待风险兑现或收敛" />
       </section>
-      <JudgmentPanel title="风险证据链" block={context.riskCard} accent="red" />
+      <ChainSummary summary={data.riskSummary} />
+      <JudgmentPanel title="风险证据链" block={block} accent="red" />
     </div>
   );
 }
 
-function WatchPage({ context }: { context: InferenceContext }) {
+function WatchPage({ query }: { query: Query }) {
+  const api = useApi<OverviewData>("/api/market/overview", query);
+  if (api.loading || api.error || !api.data) {
+    return <State loading={api.loading} error={api.error} reload={api.reload} />;
+  }
+  const data = api.data;
+  const blocks: JudgmentBlock[] = [data.cycleCard, data.divergenceCard, data.riskCard].filter(Boolean) as JudgmentBlock[];
+  const mainlineJudgments = data.mainlineCards ?? [];
+  const leaderJudgments = data.leaderCards ?? [];
+  const allBlocks = [...blocks, ...mainlineJudgments, ...leaderJudgments];
+  const conflict = allBlocks.flatMap((b) => b.conflictList ?? []);
+  const warning = allBlocks.flatMap((b) => b.warningList ?? []);
   return (
     <div className="page-stack">
       <SectionIntro icon={ListChecks} title="明日验证" desc="今天的判断必须留下明天能验证的条件，系统随后用市场反馈奖惩证据。" />
-      <WatchPanel items={context.nextWatchList ?? []} />
+      <WatchPanel items={data.nextWatchList ?? []} />
       <section className="layout-2">
-        <EvidenceColumn title="全部冲突证据" items={collectEvidence(context, "conflictList")} tone="amber" />
-        <EvidenceColumn title="全部预警证据" items={collectEvidence(context, "warningList")} tone="red" />
+        <EvidenceColumn title="全部冲突证据" items={conflict} tone="amber" />
+        <EvidenceColumn title="全部预警证据" items={warning} tone="red" />
       </section>
     </div>
   );
 }
 
-function ReviewPage({ context, query }: { context: InferenceContext; query: Query }) {
-  const [selectedEvidence, setSelectedEvidence] = useState<EvidenceItem | null>(null);
+function ReviewPage({ query }: { query: Query }) {
+  const api = useApi<ReviewData>("/api/review/correction", query);
+  if (api.loading || api.error || !api.data) {
+    return <State loading={api.loading} error={api.error} reload={api.reload} />;
+  }
+  const data = api.data;
   return (
     <div className="page-stack">
       <SectionIntro icon={Wrench} title="复盘修正" desc="人工修正不是备注，而是给系统喂训练样本，修正后的经验会进入权重建议。" />
+      <ChainSummary summary={data.reviewSummary} />
       <section className="layout-2">
-        <CorrectionForm context={context} query={query} />
-        <EvidenceLabelForm evidence={selectedEvidence} context={context} query={query} />
+        <CorrectionScopes scopes={data.correctionScopes ?? []} query={query} reviewApi={data} />
+        <PendingReview items={data.pendingReviewItems ?? []} query={query} />
       </section>
-      <EvidencePicker context={context} onSelect={setSelectedEvidence} selected={selectedEvidence} />
     </div>
   );
 }
@@ -462,12 +516,10 @@ function ReviewPage({ context, query }: { context: InferenceContext; query: Quer
 function GrowthPage({
   growthApi,
   ruleCandidateApi,
-  context,
   query
 }: {
   growthApi: GrowthApi;
   ruleCandidateApi: RuleCandidateApi;
-  context: InferenceContext;
   query: Query;
 }) {
   if (growthApi.loading || growthApi.error || !growthApi.data) {
@@ -478,8 +530,8 @@ function GrowthPage({
     <div className="page-stack">
       <SectionIntro icon={Brain} title="系统成长" desc="验证、奖惩、人工修正都会沉淀成因子经验，下一版规则从这里长出来。" />
       <section className="layout-3">
-        <MetricCard label="当日验证点" value={String(context.nextWatchList?.length ?? 0)} sub="待市场反馈" />
         <MetricCard label="因子样本" value={String(data.factorResults?.length ?? 0)} sub="证据与引擎经验" />
+        <MetricCard label="组合表现" value={String(data.combinationResults?.length ?? 0)} sub="组合经验" />
         <MetricCard label="成长日志" value={String(data.growthLogs?.length ?? 0)} sub="系统学习记录" />
       </section>
       <section className="layout-2">
@@ -497,6 +549,134 @@ function GrowthPage({
     </div>
   );
 }
+
+
+// ---- Reusable shared components ----
+
+function ChainSummary({ summary }: { summary?: string }) {
+  if (!summary) return null;
+  return (
+    <section className="panel">
+      <PanelTitle icon={CircleDot} title="链路总结" />
+      <p className="chain-summary">{summary}</p>
+    </section>
+  );
+}
+
+function Hero({ overview }: { overview: OverviewData }) {
+  const chain = overview.query ?? {};
+  return (
+    <section className="hero">
+      <div>
+        <p className="eyebrow">Market Inference Sandbox</p>
+        <h2>{display(overview.cycleCard?.conclusion, "等待周期判断")}</h2>
+        <p>判断 → 证据 → 冲突 → 明日验证 → 市场反馈 → 奖惩 → 人工修正 → 经验沉淀</p>
+      </div>
+      <div className="hero-grid">
+        <HeroEntry label="策略边界" value={display(objectOf(overview.cycleCard?.detail).strategyBoundary)} />
+        <HeroEntry label="主线机会" value={String(overview.mainlineCards?.length ?? 0)} />
+        <HeroEntry label="参与结论" value={display(objectOf(overview.cycleCard?.detail).participationDecision)} />
+        <HeroEntry label="风险状态" value={String(overview.riskCard ? objectOf(overview.riskCard.detail).riskLevel : "--")} />
+      </div>
+    </section>
+  );
+}
+
+function HeroEntry({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function CorrectionScopes({ scopes, query, reviewApi }: { scopes: string[]; query: Query; reviewApi: ReviewData }) {
+  const [targetCode, setTargetCode] = useState("");
+  const [reason, setReason] = useState("");
+  const [status, setStatus] = useState("");
+
+  async function submit() {
+    setStatus("提交中");
+    try {
+      await postJson("/api/review/correction", {
+        tradeDate: query.tradeDate || reviewApi.query?.tradeDate,
+        asOfDate: query.asOfDate || reviewApi.query?.asOfDate || query.tradeDate || reviewApi.query?.tradeDate,
+        judgementMode: query.judgementMode || "RETROSPECTIVE",
+        correctionType: "CONCLUSION",
+        correctionReason: reason || "人工复盘修正",
+        reviewer: "manual",
+        items: [{ fieldName: "conclusion", oldValue: "", newValue: reason, fieldDesc: "人工修正结论" }]
+      });
+      setStatus("已提交，已进入经验成长");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  return (
+    <section className="panel">
+      <PanelTitle icon={Wrench} title="修正范围" right={`${scopes.length} 类`} />
+      <ul className="scope-list">
+        {scopes.length ? scopes.map((s, i) => <li key={i}>{s}</li>) : <Empty />}
+      </ul>
+      <div className="form-grid">
+        <label><span>对象代码</span><input value={targetCode} onChange={(event) => setTargetCode(event.target.value)} /></label>
+        <label className="full"><span>修正原因</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+        <button className="primary" onClick={submit}>提交修正并反哺</button>
+        <p className="form-status">{status}</p>
+      </div>
+    </section>
+  );
+}
+
+function PendingReview({ items, query }: { items: string[]; query: Query }) {
+  const [status, setStatus] = useState("");
+  const [evidenceId, setEvidenceId] = useState("");
+  const [labelResult, setLabelResult] = useState("VALID");
+  const [reason, setReason] = useState("");
+
+  async function submit() {
+    if (!evidenceId) {
+      setStatus("先填写证据 ID");
+      return;
+    }
+    setStatus("提交中");
+    try {
+      await postJson("/api/review/evidence-label", {
+        evidenceId,
+        tradeDate: query.tradeDate,
+        labelResult,
+        labelReason: reason || "人工证据标注",
+        reviewer: "manual"
+      });
+      setStatus("已提交，证据已进入经验样本");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  return (
+    <section className="panel">
+      <PanelTitle icon={BookOpenCheck} title="待复核项 / 证据标注" right={`${items.length} 条`} />
+      <ul className="scope-list">
+        {items.length ? items.map((s, i) => <li key={i}>{s}</li>) : <Empty />}
+      </ul>
+      <div className="form-grid">
+        <label><span>证据 ID</span><input value={evidenceId} onChange={(event) => setEvidenceId(event.target.value)} /></label>
+        <label><span>标注</span>
+          <select value={labelResult} onChange={(event) => setLabelResult(event.target.value)}>
+            {["VALID", "INVALID", "OVER_WEIGHTED", "UNDER_WEIGHTED"].map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label className="full"><span>原因</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+        <button className="primary" onClick={submit}>提交证据标注</button>
+        <p className="form-status">{status}</p>
+      </div>
+    </section>
+  );
+}
+
 
 function HistoryReplayPanel({ query }: { query: Query }) {
   const [startDate, setStartDate] = useState(query.tradeDate || "");
@@ -563,6 +743,7 @@ function HistoryReplayPanel({ query }: { query: Query }) {
     </section>
   );
 }
+
 
 function RuleEvolutionPanel({ query, candidateApi }: { query: Query; candidateApi: RuleCandidateApi }) {
   const [operator, setOperator] = useState("manual");
@@ -714,6 +895,7 @@ function RuleEvolutionPanel({ query, candidateApi }: { query: Query; candidateAp
   );
 }
 
+
 function StatusBadge({ status }: { status?: string }) {
   const className = String(status ?? "UNKNOWN").toLowerCase().replace(/_/g, "-");
   return <span className={`status-badge ${className}`}>{statusText(status)}</span>;
@@ -732,54 +914,8 @@ function RuleStateFlow({ status }: { status?: string }) {
   );
 }
 
-function Hero({ context }: { context: InferenceContext }) {
-  const chain = context.chain ?? {};
-  return (
-    <section className="hero">
-      <div>
-        <p className="eyebrow">Market Inference Sandbox</p>
-        <h2>{display(chain.currentStage, "等待周期判断")}</h2>
-        <p>{display(chain.chainSlogan, "判断 -> 证据 -> 冲突 -> 明日验证 -> 市场反馈 -> 奖惩 -> 人工修正 -> 经验沉淀")}</p>
-      </div>
-      <div className="hero-grid">
-        <HeroItem label="策略边界" value={display(chain.strategyBoundary)} />
-        <HeroItem label="主线机会" value={display(chain.opportunityState)} />
-        <HeroItem label="参与结论" value={display(chain.participationDecision)} />
-        <HeroItem label="风险状态" value={display(chain.riskState)} />
-      </div>
-    </section>
-  );
-}
 
-function HeroItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
 
-function ChainMap({ nodes }: { nodes: ChainNode[] }) {
-  if (!nodes.length) return <EmptyPanel title="推演链路" />;
-  return (
-    <section className="panel">
-      <PanelTitle icon={CircleDot} title="核心推演链路" right={`${nodes.length} 个判断节点`} />
-      <div className="chain-map">
-        {nodes.map((node, index) => (
-          <React.Fragment key={`${node.nodeCode}-${index}`}>
-            <div className={node.conflictCount || node.warningCount ? "chain-node warn" : "chain-node"}>
-              <span>{node.nodeName}</span>
-              <strong>{display(node.targetName || node.targetCode || node.nodeCode)}</strong>
-              <small>{formatConfidence(node.confidence)} · 证据 {node.evidenceCount ?? 0} · 冲突 {node.conflictCount ?? 0}</small>
-            </div>
-            {index < nodes.length - 1 && <ChevronRight className="chain-arrow" size={18} />}
-          </React.Fragment>
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function CandidateBoard({ title, blocks, kind, expanded = false }: { title: string; blocks: JudgmentBlock[]; kind: "mainline" | "leader"; expanded?: boolean }) {
   return (
@@ -930,110 +1066,8 @@ function WatchPanel({ items, compact = false }: { items: NextWatchItem[]; compac
   );
 }
 
-function CorrectionForm({ context, query }: { context: InferenceContext; query: Query }) {
-  const [engineType, setEngineType] = useState("CYCLE");
-  const [targetCode, setTargetCode] = useState("MARKET");
-  const [reason, setReason] = useState("");
-  const [status, setStatus] = useState("");
 
-  async function submit() {
-    setStatus("提交中");
-    const block = blockByEngine(context, engineType);
-    const payload = {
-      tradeDate: query.tradeDate || context.query?.tradeDate,
-      asOfDate: query.asOfDate || context.query?.asOfDate || query.tradeDate || context.query?.tradeDate,
-      judgementMode: query.judgementMode || "RETROSPECTIVE",
-      engineType,
-      targetType: engineType === "CYCLE" || engineType === "RISK" ? "MARKET" : engineType === "LEADER" ? "STOCK" : "PLATE",
-      targetCode,
-      judgementId: block?.meta?.judgementId,
-      correctionType: "CONCLUSION",
-      correctionReason: reason || "人工复盘修正",
-      reviewer: "manual",
-      items: [{ fieldName: "conclusion", oldValue: block?.conclusion ?? "", newValue: reason, fieldDesc: "人工修正结论" }]
-    };
-    try {
-      await postJson("/api/review/correction", payload);
-      setStatus("已提交，已进入经验成长");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-    }
-  }
 
-  return (
-    <section className="panel">
-      <PanelTitle icon={Wrench} title="判断修正" />
-      <div className="form-grid">
-        <label><span>引擎</span><select value={engineType} onChange={(event) => setEngineType(event.target.value)}>{["CYCLE", "MAINLINE", "LEADER", "DIVERGENCE_CONSENSUS", "RISK"].map((item) => <option key={item}>{item}</option>)}</select></label>
-        <label><span>对象代码</span><input value={targetCode} onChange={(event) => setTargetCode(event.target.value)} /></label>
-        <label className="full"><span>修正原因</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="例如：该日机器人只是弱修复，不应进入主线确认。" /></label>
-        <button className="primary" onClick={submit}>提交修正并反哺</button>
-        <p className="form-status">{status}</p>
-      </div>
-    </section>
-  );
-}
-
-function EvidenceLabelForm({ evidence, context, query }: { evidence: EvidenceItem | null; context: InferenceContext; query: Query }) {
-  const [labelResult, setLabelResult] = useState("VALID");
-  const [reason, setReason] = useState("");
-  const [status, setStatus] = useState("");
-  const judgementId = findJudgementIdForEvidence(context, evidence);
-
-  async function submit() {
-    if (!evidence?.evidenceCode && !evidence?.factorCode) {
-      setStatus("先选择一条证据");
-      return;
-    }
-    setStatus("提交中");
-    try {
-      await postJson("/api/review/evidence-label", {
-        evidenceId: evidence.evidenceCode,
-        judgementId,
-        tradeDate: query.tradeDate || context.query?.tradeDate,
-        labelResult,
-        labelReason: reason || "人工证据标注",
-        reviewer: "manual"
-      });
-      setStatus("已提交，证据已进入经验样本");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  return (
-    <section className="panel">
-      <PanelTitle icon={BookOpenCheck} title="证据标注" />
-      <div className="selected-evidence">
-        <b>{display(evidence?.title || evidence?.evidenceTitle || evidence?.evidenceCode, "未选择证据")}</b>
-        <p>{display(evidence?.description || evidence?.evidenceDesc)}</p>
-      </div>
-      <div className="form-grid">
-        <label><span>标注</span><select value={labelResult} onChange={(event) => setLabelResult(event.target.value)}>{["VALID", "INVALID", "OVER_WEIGHTED", "UNDER_WEIGHTED"].map((item) => <option key={item}>{item}</option>)}</select></label>
-        <label className="full"><span>原因</span><textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="说明这条证据为什么有效/无效/权重不合适。" /></label>
-        <button className="primary" onClick={submit}>提交证据标注</button>
-        <p className="form-status">{status}</p>
-      </div>
-    </section>
-  );
-}
-
-function EvidencePicker({ context, selected, onSelect }: { context: InferenceContext; selected: EvidenceItem | null; onSelect: (item: EvidenceItem) => void }) {
-  const items = collectEvidence(context, "evidenceList").concat(collectEvidence(context, "conflictList"), collectEvidence(context, "warningList"));
-  return (
-    <section className="panel">
-      <PanelTitle icon={BookOpenCheck} title="选择证据" right={`${items.length} 条`} />
-      <div className="evidence-picker">
-        {items.length ? items.map((item, index) => (
-          <button key={`${item.evidenceCode}-${index}`} className={selected === item ? "selected" : ""} onClick={() => onSelect(item)}>
-            <b>{display(item.title || item.evidenceTitle || item.factorCode)}</b>
-            <span>{display(item.evidenceType)} · {display(item.score)} · {display(item.sourceTable)}</span>
-          </button>
-        )) : <Empty />}
-      </div>
-    </section>
-  );
-}
 
 function DataPanel({ title, rows, columns }: { title: string; rows: Record<string, unknown>[]; columns: string[] }) {
   return (
@@ -1169,26 +1203,8 @@ async function readApiResponse<T>(response: Response): Promise<ApiResponse<T>> {
   return json ?? ({ success: true, code: "OK", message: "success", data: undefined as T });
 }
 
-function blockByEngine(context: InferenceContext, engineType: string): JudgmentBlock | undefined {
-  if (engineType === "CYCLE") return context.cycleCard;
-  if (engineType === "RISK") return context.riskCard;
-  if (engineType === "DIVERGENCE_CONSENSUS") return context.divergenceCard;
-  if (engineType === "MAINLINE") return context.mainlineCards?.[0];
-  if (engineType === "LEADER") return context.leaderCards?.[0];
-  return undefined;
-}
 
-function findJudgementIdForEvidence(context: InferenceContext, evidence: EvidenceItem | null) {
-  if (!evidence) return "";
-  const blocks = [context.cycleCard, ...(context.mainlineCards ?? []), ...(context.leaderCards ?? []), context.divergenceCard, context.riskCard].filter(Boolean) as JudgmentBlock[];
-  const owner = blocks.find((block) => [...(block.evidenceList ?? []), ...(block.conflictList ?? []), ...(block.warningList ?? [])].includes(evidence));
-  return owner?.meta?.judgementId ?? "";
-}
 
-function collectEvidence(context: InferenceContext, key: "evidenceList" | "conflictList" | "warningList") {
-  const blocks = [context.cycleCard, ...(context.mainlineCards ?? []), ...(context.leaderCards ?? []), context.divergenceCard, context.riskCard].filter(Boolean) as JudgmentBlock[];
-  return blocks.flatMap((block) => block[key] ?? []);
-}
 
 function summaryPairs(detail: Record<string, unknown>): [string, string][] {
   const candidates: [string, unknown][] = [
@@ -1208,9 +1224,6 @@ function objectOf(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
 
-function totalCount(nodes: ChainNode[] | undefined, key: keyof ChainNode) {
-  return (nodes ?? []).reduce((sum, node) => sum + Number(node[key] ?? 0), 0);
-}
 
 function countByStatus(items: RuleCandidate[]) {
   const counts: Record<string, number> = {};

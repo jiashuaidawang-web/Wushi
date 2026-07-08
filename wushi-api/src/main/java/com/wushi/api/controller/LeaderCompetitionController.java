@@ -51,14 +51,19 @@ public class LeaderCompetitionController {
             @RequestParam(required = false) String plateCode,
             @RequestParam(required = false) String plateName,
             @RequestParam(required = false, defaultValue = "5") Integer candidateLimit) {
-        MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
-        EngineRequest request = createRequest(query, stockCode, stockName, plateCode, plateName);
-        List<JudgmentBlockVO<LeaderJudgementDetail>> leaderCards = leaderCompetitionEngine
-                .judgeCandidates(request, safeLimit(candidateLimit))
-                .stream()
-                .map(judgmentBlockAssembler::toBlock)
-                .toList();
-        return ApiResponse.ok(new LeaderCompetitionVO(query, leaderCards, buildCompetitionSummary(leaderCards)));
+        try {
+            MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
+            EngineRequest request = createRequest(query, stockCode, stockName, plateCode, plateName);
+            List<JudgmentBlockVO<LeaderJudgementDetail>> leaderCards = leaderCompetitionEngine
+                    .judgeCandidates(request, safeLimit(candidateLimit))
+                    .stream()
+                    .map(judgmentBlockAssembler::toBlock)
+                    .toList();
+            return ApiResponse.ok(new LeaderCompetitionVO(query, leaderCards, buildCompetitionSummary(leaderCards)));
+        } catch (Exception ex) {
+            MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
+            return ApiResponse.ok(new LeaderCompetitionVO(query, List.of(), "龙头引擎暂不可用：" + ex.getMessage()));
+        }
     }
 
     private EngineRequest createRequest(MarketQuery query, String stockCode, String stockName, String plateCode, String plateName) {

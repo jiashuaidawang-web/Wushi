@@ -90,51 +90,65 @@ public class MarketOverviewController {
             @RequestParam(required = false) JudgementMode judgementMode,
             @RequestParam(required = false) String ruleVersion,
             @RequestParam(required = false, defaultValue = "3") Integer leaderCandidateLimit) {
-        MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
-        EngineRequest cycleRequest = engineRequestFactory.create(
-                query.tradeDate(),
-                query.asOfDate(),
-                query.judgementMode(),
-                EngineType.CYCLE,
-                TargetType.MARKET,
-                "MARKET",
-                "全市场",
-                query.ruleVersion(),
-                CYCLE_REQUIRED_TABLES,
-                Map.of()
-        );
-        var cycleJudgement = cycleRecognitionEngine.judge(cycleRequest);
-        var cycleCard = judgmentBlockAssembler.toBlock(cycleJudgement);
+        try {
+            MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
+            EngineRequest cycleRequest = engineRequestFactory.create(
+                    query.tradeDate(),
+                    query.asOfDate(),
+                    query.judgementMode(),
+                    EngineType.CYCLE,
+                    TargetType.MARKET,
+                    "MARKET",
+                    "全市场",
+                    query.ruleVersion(),
+                    CYCLE_REQUIRED_TABLES,
+                    Map.of()
+            );
+            var cycleJudgement = cycleRecognitionEngine.judge(cycleRequest);
+            var cycleCard = judgmentBlockAssembler.toBlock(cycleJudgement);
 
-        List<JudgmentBlockVO<MainlineJudgementDetail>> mainlineCards = buildMainlineCards(query);
-        List<JudgmentBlockVO<LeaderJudgementDetail>> leaderCards = buildLeaderCards(query, leaderCandidateLimit);
-        JudgmentBlockVO<DivergenceConsensusDetail> divergenceCard = buildDivergenceCard(query);
-        JudgmentBlockVO<RiskRadarDetail> riskCard = buildRiskCard(query);
-        List<NextWatchItemVO> nextWatchList = new ArrayList<>(safeList(cycleCard.nextWatchList()));
-        List<DataQualityIssueVO> dataQualityIssues = new ArrayList<>(safeList(cycleCard.dataQualityIssues()));
-        mainlineCards.forEach(card -> {
-            nextWatchList.addAll(safeList(card.nextWatchList()));
-            dataQualityIssues.addAll(safeList(card.dataQualityIssues()));
-        });
-        leaderCards.forEach(card -> {
-            nextWatchList.addAll(safeList(card.nextWatchList()));
-            dataQualityIssues.addAll(safeList(card.dataQualityIssues()));
-        });
-        nextWatchList.addAll(safeList(divergenceCard.nextWatchList()));
-        nextWatchList.addAll(safeList(riskCard.nextWatchList()));
-        dataQualityIssues.addAll(safeList(divergenceCard.dataQualityIssues()));
-        dataQualityIssues.addAll(safeList(riskCard.dataQualityIssues()));
+            List<JudgmentBlockVO<MainlineJudgementDetail>> mainlineCards = buildMainlineCards(query);
+            List<JudgmentBlockVO<LeaderJudgementDetail>> leaderCards = buildLeaderCards(query, leaderCandidateLimit);
+            JudgmentBlockVO<DivergenceConsensusDetail> divergenceCard = buildDivergenceCard(query);
+            JudgmentBlockVO<RiskRadarDetail> riskCard = buildRiskCard(query);
+            List<NextWatchItemVO> nextWatchList = new ArrayList<>(safeList(cycleCard.nextWatchList()));
+            List<DataQualityIssueVO> dataQualityIssues = new ArrayList<>(safeList(cycleCard.dataQualityIssues()));
+            mainlineCards.forEach(card -> {
+                nextWatchList.addAll(safeList(card.nextWatchList()));
+                dataQualityIssues.addAll(safeList(card.dataQualityIssues()));
+            });
+            leaderCards.forEach(card -> {
+                nextWatchList.addAll(safeList(card.nextWatchList()));
+                dataQualityIssues.addAll(safeList(card.dataQualityIssues()));
+            });
+            nextWatchList.addAll(safeList(divergenceCard.nextWatchList()));
+            nextWatchList.addAll(safeList(riskCard.nextWatchList()));
+            dataQualityIssues.addAll(safeList(divergenceCard.dataQualityIssues()));
+            dataQualityIssues.addAll(safeList(riskCard.dataQualityIssues()));
 
-        return ApiResponse.ok(new MarketOverviewVO(
-                query,
-                cycleCard,
-                mainlineCards,
-                leaderCards,
-                divergenceCard,
-                riskCard,
-                nextWatchList,
-                dataQualityIssues
-        ));
+            return ApiResponse.ok(new MarketOverviewVO(
+                    query,
+                    cycleCard,
+                    mainlineCards,
+                    leaderCards,
+                    divergenceCard,
+                    riskCard,
+                    nextWatchList,
+                    dataQualityIssues
+            ));
+        } catch (Exception ex) {
+            MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
+            return ApiResponse.ok(new MarketOverviewVO(
+                    query,
+                    null,
+                    List.of(),
+                    List.of(),
+                    null,
+                    null,
+                    List.of(),
+                    List.of()
+            ));
+        }
     }
 
     private List<JudgmentBlockVO<MainlineJudgementDetail>> buildMainlineCards(MarketQuery query) {
