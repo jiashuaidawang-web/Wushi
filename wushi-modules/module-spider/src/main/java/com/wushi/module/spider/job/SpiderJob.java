@@ -198,6 +198,48 @@ public class SpiderJob {
         }
     }
 
+    /**
+     * 同花顺全量日跑批 (板块维度 + 板块个股关系)
+     */
+    public Map<String, Object> runThsDaily(LocalDate tradeDate) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("plates", runThsPlates(tradeDate));
+        result.put("relations", runThsRelations(tradeDate));
+        return result;
+    }
+
+    /**
+     * 同花顺仅抓取板块维度
+     */
+    public Map<String, Object> runThsPlates(LocalDate tradeDate) {
+        String taskCode = "ths_plate_dimension";
+        try {
+            if (checkpointService.isAlreadySucceeded(taskCode, tradeDate, SpiderProviderType.TONG_HUA_SHUN.name())) {
+                log.info("同花顺板块维度任务已跳过(今日已成功): tradeDate={}", tradeDate);
+                return Map.of("plateCount", 0, "inserted", 0);
+            }
+            checkpointService.markRunning(taskCode, taskCode, tradeDate, SpiderProviderType.TONG_HUA_SHUN.name());
+
+            List<StockPlateDimensionRow> plates = thsSpiderService.fetchAllPlates(tradeDate);
+            SpiderResult<StockPlateDimensionRow> spiderResult = SpiderResult.<StockPlateDimensionRow>builder()
+                    .taskCode(taskCode)
+                    .provider(SpiderProviderType.TONG_HUA_SHUN.name())
+                    .status(SpiderTaskStatus.SUCCESS)
+                    .rows(plates)
+                    .fetchedCount(plates.size())
+                    .successCount(plates.size())
+                    .build();
+            SpiderWriteResult writeResult = ingestionService.ingest(spiderResult);
+            checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.TONG_HUA_SHUN.name(),
+                    plates.size(), 0, null);
+            return Map.of("plateCount", plates.size(), "inserted", writeResult.getInsertedCount());
+        } catch (Exception e) {
+            log.error("同花顺板块维度抓取失败: {}", e.getMessage());
+            checkpointService.markFailed(taskCode, tradeDate, SpiderProviderType.TONG_HUA_SHUN.name(), e.getMessage());
+            return Map.of("success", false, "error", e.getMessage());
+        }
+    }
+
     private int runEastMoneyStockDailyKline(LocalDate tradeDate) {
         String taskCode = "stock_daily_kline";
         try {

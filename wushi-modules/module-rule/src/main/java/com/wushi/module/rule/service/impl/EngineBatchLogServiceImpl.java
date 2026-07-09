@@ -1,8 +1,8 @@
 package com.wushi.module.rule.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.metadata.IPAGE;
-import com.baomidou.mybatisplus.extension.plugins.Page;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDate;
 
 import com.wushi.common.enums.BatchStatus;

@@ -1,7 +1,7 @@
 package com.wushi.module.spider.eastmoney;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.wushi.module.spider.common.JsonpParser;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wushi.module.spider.common.SpiderHttpClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +11,8 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 东财爬虫客户端 - 带代理池轮换
@@ -23,9 +25,10 @@ public class EastMoneySpiderClient {
     private static final int PAGE_SIZE = 100;
     private static final DateTimeFormatter BASIC_DATE = DateTimeFormatter.BASIC_ISO_DATE;
     private static final int MAX_RETRY = 3;
+    private static final Pattern JSONP = Pattern.compile("(?:^|\\s)(\\w+)\\s*\\((.*)\\)\\s*;?\\s*$", Pattern.DOTALL);
 
     private final SpiderHttpClient httpClient;
-    private final JsonpParser jsonpParser;
+    private final ObjectMapper objectMapper;
     private final EastMoneyProxyProvider proxyProvider;
     private final EastMoneyProperties eastMoneyProperties;
 
@@ -42,7 +45,7 @@ public class EastMoneySpiderClient {
             String url = String.format(endpoint.getUrlTemplate(), page, System.currentTimeMillis());
             try {
                 String body = fetchWithRetry(url, maxRetry);
-                JsonNode root = jsonpParser.parse(body);
+                JsonNode root = parseJsonp(body);
                 JsonNode data = root.path("data");
                 total = data.path("total").asInt(total);
                 totalPage = Math.max(1, (int) Math.ceil(total / (double) PAGE_SIZE));
@@ -67,7 +70,7 @@ public class EastMoneySpiderClient {
         String url = String.format(endpoint.getUrlTemplate(), tradeDate.format(BASIC_DATE), System.currentTimeMillis());
         try {
             String body = fetchWithRetry(url, maxRetry);
-            JsonNode root = jsonpParser.parse(body);
+            JsonNode root = parseJsonp(body);
             JsonNode data = root.path("data");
             int total = data.path("tc").asInt(0);
             List<JsonNode> rows = new ArrayList<>();
@@ -98,7 +101,7 @@ public class EastMoneySpiderClient {
             String url = String.format(template, cb, bkNumber, page, System.currentTimeMillis());
             try {
                 String body = fetchWithRetry(url, maxRetry);
-                JsonNode root = jsonpParser.parse(body);
+                JsonNode root = parseJsonp(body);
                 JsonNode data = root.path("data");
                 if (data.isMissingNode() || data.isNull()) break;
                 total = data.path("total").asInt(total);
@@ -117,9 +120,6 @@ public class EastMoneySpiderClient {
 
     // ========== 代理+重试 ==========
 
-    /**
-     * 带代理轮换的重试请求
-     */
     private String fetchWithRetry(String url, int maxRetry) throws Exception {
         Exception lastException = null;
 
@@ -133,7 +133,6 @@ public class EastMoneySpiderClient {
                 } else {
                     body = httpClient.get(url, headers);
                 }
-                // 校验返回是否含反爬标记
                 if (isBlocked(body)) {
                     log.warn("东财请求被反爬, attempt={}, proxy={}", attempt + 1, proxyLabel(proxy));
                     continue;
@@ -146,6 +145,25 @@ public class EastMoneySpiderClient {
             }
         }
         throw new Exception("东财请求" + maxRetry + "次全部失败: " + lastException);
+    }
+
+    // ========== JSONP 解析 ==========
+
+    private JsonNode parseJsonp(String body) {
+        if (body == null || body.isBlank()) {
+            return objectMapper.createObjectNode();
+        }
+        String trimmed = body.trim();
+        Matcher matcher = JSONP.matcher(trimmed);
+        try {
+            if (matcher.matches()) {
+                return objectMapper.readTree(matcher.group(2));
+            }
+            return objectMapper.readTree(trimmed);
+        } catch (Exception e) {
+            log.warn("JSONP解析失败: {}", e.getMessage());
+            return objectMapper.createObjectNode();
+        }
     }
 
     private boolean isBlocked(String body) {

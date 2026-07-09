@@ -23,10 +23,9 @@ import java.util.regex.Pattern;
  * 
  * 特性:
  * 1. Playwright 原生 API (比 Selenium 更快更稳定)
- * 2. Stealth 模式反检测 (绕过 webdriver 检测)
+ * 2. Stealth 模式反检测 (通过 addInitScript 注入 JS)
  * 3. 真实用户行为模拟 (鼠标移动/点击/滚动/打字延迟)
  * 4. 代理池轮换 (复用 ThsBrowserProperties 配置)
- * 5. 断点续传 (通过 SpiderCheckpointService)
  */
 @Service
 @RequiredArgsConstructor
@@ -85,7 +84,7 @@ public class ThsPlaywrightSpiderServiceImpl {
             } catch (Exception e) {
                 log.warn("同花顺Playwright {}板块抓取失败: {}", cat[2], e.getMessage());
             }
-            humanDelay(1000, 2000); // 板块间延迟
+            humanDelay(1000, 2000);
         }
         return allPlates;
     }
@@ -101,24 +100,18 @@ public class ThsPlaywrightSpiderServiceImpl {
             browser = createBrowser(playwright);
             Page page = browser.newPage();
 
-            // 设置 stealth 模式
             applyStealth(page);
-
-            // 导航到页面
             page.navigate(url, new Page.NavigateOptions().setTimeout(60000));
             page.waitForLoadState(LoadState.NETWORKIDLE);
 
-            // 模拟真实用户: 随机滚动
             humanScroll(page);
             humanDelay(500, 1500);
 
-            // 检测验证码
             if (detectCaptcha(page)) {
                 log.warn("同花顺Playwright检测到验证码, url={}", url);
                 handleCaptcha(page);
             }
 
-            // 提取板块链接
             List<StockPlateDimensionRow> plates = new ArrayList<>();
             Locator links = page.locator("a[href*='/code/']");
             int count = links.count();
@@ -130,19 +123,19 @@ public class ThsPlaywrightSpiderServiceImpl {
 
                     Matcher matcher = PLATE_CODE_PATTERN.matcher(href);
                     if (matcher.find()) {
-                        String plateCode = matcher.group(1);
-                        plates.add(new StockPlateDimensionRow(
-                                plateCode, text.trim(), plateType,
-                                "", "ACTIVE", "0" // source: 0 = ths
-                        ));
+                        StockPlateDimensionRow row = new StockPlateDimensionRow();
+                        row.setPlateCode(matcher.group(1));
+                        row.setPlateName(text.trim());
+                        row.setPlateType(plateType);
+                        row.setTradeDate(tradeDate);
+                        row.setSource("ths");
+                        plates.add(row);
                     }
-                } catch (Exception ignored) {
+                } catch (Exception e) {
+                    log.warn("提取板块链接失败: {}", e.getMessage());
                 }
             }
             return plates;
-        } catch (Exception e) {
-            log.error("同花顺Playwright板块页面抓取失败: url={}, error={}", url, e.getMessage());
-            return List.of();
         } finally {
             closeQuietly(browser);
             closeQuietly(playwright);
@@ -150,188 +143,138 @@ public class ThsPlaywrightSpiderServiceImpl {
     }
 
     /**
-     * 抓取所有板块下的个股关系
+     * 抓取所有板块个股关系
      */
     public List<StockPlateRelationSnapshotRow> fetchAllPlateRelations(LocalDate tradeDate) {
         List<StockPlateRelationSnapshotRow> allRelations = new ArrayList<>();
+        List<StockPlateDimensionRow> plates = fetchAllPlates(tradeDate);
+
+        for (StockPlateDimensionRow plate : plates) {
+            try {
+                List<StockPlateRelationSnapshotRow> relations = fetchPlateStocks(plate.getPlateCode(), tradeDate);
+                allRelations.addAll(relations);
+                log.debug("同花顺Playwright板块个股抓取: plateCode={}, count={}", plate.getPlateCode(), relations.size());
+            } catch (Exception e) {
+                log.warn("同花顺Playwright板块个股抓取失败: plateCode={}, error={}", plate.getPlateCode(), e.getMessage());
+            }
+            humanDelay(800, 1500);
+        }
+        return allRelations;
+    }
+
+    /**
+     * 抓取单个板块下的个股
+     */
+    public List<StockPlateRelationSnapshotRow> fetchPlateStocks(String plateCode, LocalDate tradeDate) {
         Playwright playwright = null;
         Browser browser = null;
-
         try {
             playwright = Playwright.create();
             browser = createBrowser(playwright);
             Page page = browser.newPage();
+
             applyStealth(page);
 
-            // 概念板块
-            page.navigate(THS_HOME + "gn/", new Page.NavigateOptions().setTimeout(60000));
+            String url = THS_HOME + "code/" + plateCode + "/";
+            page.navigate(url, new Page.NavigateOptions().setTimeout(60000));
             page.waitForLoadState(LoadState.NETWORKIDLE);
+
             humanScroll(page);
+            humanDelay(500, 1500);
 
             if (detectCaptcha(page)) {
                 handleCaptcha(page);
             }
 
-            // 获取所有概念板块链接
-            Locator plateLinks = page.locator("a[href*='/code/']");
-            Set<String> visitedPlates = new HashSet<>();
-            int plateCount = plateLinks.count();
-
-            for (int i = 0; i < plateCount; i++) {
+            List<StockPlateRelationSnapshotRow> relations = new ArrayList<>();
+            Locator rows = page.locator("table tbody tr");
+            int count = rows.count();
+            for (int i = 0; i < count; i++) {
                 try {
-                    String href = plateLinks.nth(i).getAttribute("href");
-                    String plateName = plateLinks.nth(i).textContent();
-                    if (href == null) continue;
-
-                    Matcher matcher = PLATE_CODE_PATTERN.matcher(href);
-                    if (!matcher.find()) continue;
-                    String plateCode = matcher.group(1);
-                    if (visitedPlates.contains(plateCode)) continue;
-                    visitedPlates.add(plateCode);
-
-                    // 访问板块详情页
-                    String plateUrl = THS_HOME + "gn/code/" + plateCode + "/";
-                    page.navigate(plateUrl, new Page.NavigateOptions().setTimeout(60000));
-                    page.waitForLoadState(LoadState.NETWORKIDLE);
-                    humanScroll(page);
-                    humanDelay(800, 1500);
-
-                    // 提取个股
-                    Locator stockLinks = page.locator("a[href*='/page/'], a[href*='/stock/']");
-                    int stockCount = stockLinks.count();
-                    for (int j = 0; j < stockCount; j++) {
-                        try {
-                            String text = stockLinks.nth(j).textContent();
-                            if (text == null) continue;
-                            Matcher m = STOCK_CODE_PATTERN.matcher(text);
-                            if (m.find()) {
-                                String stockCode = m.group(1);
-                                allRelations.add(new StockPlateRelationSnapshotRow(
-                                        tradeDate, stockCode, "", plateCode, plateName,
-                                        "CONCEPT", "HISTORICAL_CRAWLED",
-                                        new BigDecimal("0.7000"), 1, "0"
-                                ));
-                            }
-                        } catch (Exception ignored) {
+                    List<String> cells = rows.nth(i).locator("td").allTextContents();
+                    if (cells.size() >= 2) {
+                        String stockCode = STOCK_CODE_PATTERN.matcher(cells.get(0)).results()
+                                .map(m -> m.group(1)).findFirst().orElse(null);
+                        if (stockCode != null) {
+                            StockPlateRelationSnapshotRow row = new StockPlateRelationSnapshotRow();
+                            row.setPlateCode(plateCode);
+                            row.setStockCode(stockCode);
+                            row.setStockName(cells.get(1).trim());
+                            row.setTradeDate(tradeDate);
+                            row.setSource("ths");
+                            row.setRelationSource("HISTORICAL_CRAWLED");
+                            row.setRelationConfidence(new BigDecimal("0.8"));
+                            row.setIsCurrentBackfill(0);
+                            relations.add(row);
                         }
                     }
                 } catch (Exception e) {
-                    log.warn("抓取板块个股失败: {}", e.getMessage());
+                    log.warn("提取个股行失败: {}", e.getMessage());
                 }
             }
-        } catch (Exception e) {
-            log.error("同花顺Playwright板块个股关系抓取失败: {}", e.getMessage());
+            return relations;
         } finally {
             closeQuietly(browser);
             closeQuietly(playwright);
         }
-        return allRelations;
     }
 
-    // ========== Playwright 浏览器管理 ==========
+    // ========== 浏览器创建 ==========
 
     private Browser createBrowser(Playwright playwright) {
         BrowserType.LaunchOptions launchOptions = new BrowserType.LaunchOptions()
                 .setHeadless(browserProperties.isHeadless())
                 .setArgs(browserProperties.getArguments());
 
-        // 代理
         String proxy = selectProxy();
-        if (proxy != null && !proxy.isBlank()) {
-            launchOptions.setProxy(new Proxy(proxy));
-            log.debug("Playwright使用代理: {}", proxyLabel(proxy));
+        if (proxy != null) {
+            launchOptions.setProxy(new com.microsoft.playwright.options.Proxy(proxy));
         }
 
-        // 远端 Playwright 服务 (可选)
         if (StringUtils.hasText(browserProperties.getRemoteUrl())) {
-            // Playwright 支持 CDP 连接远端
             return playwright.chromium().connect(browserProperties.getRemoteUrl());
-        }
-
-        // 本地 Chrome/Chromium
-        if (StringUtils.hasText(browserProperties.getChromeBinary())) {
-            launchOptions.setExecutablePath(browserProperties.getChromeBinary());
         }
 
         return playwright.chromium().launch(launchOptions);
     }
 
     /**
-     * Stealth 反检测
+     * Stealth 反检测 (通过 JS 注入)
      */
     private void applyStealth(Page page) {
-        // 设置真实 User-Agent
         page.newContext(new Browser.NewContextOptions()
                 .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
                 .setViewportSize(1920, 1080)
                 .setLocale("zh-CN")
                 .setTimezoneId("Asia/Shanghai"));
 
-        // 注入 stealth JS (绕过 webdriver 检测)
-        page.addInitScript("""
-            // 覆盖 navigator.webdriver
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            // 覆盖 chrome 对象
-            window.chrome = { runtime: {} };
-            // 覆盖 permissions
-            const originalQuery = window.navigator.permissions.query;
-            window.navigator.permissions.query = (parameters) => (
-                parameters.name === 'notifications' ?
-                    Promise.resolve({ state: Notification.permission }) :
-                    originalQuery(parameters)
-            );
-            // 覆盖 plugins
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-            // 覆盖 languages
-            Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });
-        """);
+        page.addInitScript(
+            "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });" +
+            "window.chrome = { runtime: {} };" +
+            "const oq = window.navigator.permissions.query;" +
+            "window.navigator.permissions.query = (p) => p.name === 'notifications' ? Promise.resolve({ state: Notification.permission }) : oq(p);" +
+            "Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });" +
+            "Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });"
+        );
     }
 
     // ========== 真实用户行为模拟 ==========
 
-    /**
-     * 模拟人类滚动 (随机距离+速度)
-     */
     private void humanScroll(Page page) {
         int scrollCount = ThreadLocalRandom.current().nextInt(2, 5);
         for (int i = 0; i < scrollCount; i++) {
-            int distance = ThreadLocalRandom.current().nextInt(300, 800);
-            page.mouse().wheel(0, distance);
+            page.mouse().wheel(0, ThreadLocalRandom.current().nextInt(300, 800));
             humanDelay(200, 600);
         }
     }
 
-    /**
-     * 模拟人类鼠标移动
-     */
     private void humanMouseMove(Page page) {
-        int viewportWidth = 1920;
-        int viewportHeight = 1080;
-        int targetX = ThreadLocalRandom.current().nextInt(100, viewportWidth - 100);
-        int targetY = ThreadLocalRandom.current().nextInt(100, viewportHeight - 100);
-        page.mouse().move(targetX, targetY);
+        page.mouse().move(
+            ThreadLocalRandom.current().nextInt(100, 1820),
+            ThreadLocalRandom.current().nextInt(100, 980)
+        );
     }
 
-    /**
-     * 模拟人类点击 (先移动到元素再点击)
-     */
-    private void humanClick(Locator locator) {
-        // 添加随机偏移
-        locator.click(new Locator.ClickOptions().setDelay(ThreadLocalRandom.current().nextInt(50, 150)));
-    }
-
-    /**
-     * 模拟人类打字 (逐字符+随机延迟)
-     */
-    private void humanType(Locator locator, String text) {
-        for (char c : text.toCharArray()) {
-            locator.type(String.valueOf(c), new Locator.TypeOptions().setDelay(ThreadLocalRandom.current().nextInt(50, 200)));
-        }
-    }
-
-    /**
-     * 人类式随机延迟
-     */
     private void humanDelay(int minMs, int maxMs) {
         try {
             Thread.sleep(ThreadLocalRandom.current().nextInt(minMs, maxMs));
@@ -366,14 +309,8 @@ public class ThsPlaywrightSpiderServiceImpl {
 
     private String selectProxy() {
         List<String> proxies = proxyProvider.availableProxies();
-        if (proxies.isEmpty()) {
-            return browserProperties.isDirectFirst() ? null : null;
-        }
+        if (proxies.isEmpty()) return null;
         return proxies.get(ThreadLocalRandom.current().nextInt(proxies.size()));
-    }
-
-    private String proxyLabel(String proxy) {
-        return proxy == null || proxy.isBlank() ? "DIRECT" : proxy.substring(0, Math.min(proxy.length(), 20)) + "...";
     }
 
     private void closeQuietly(AutoCloseable closeable) {
