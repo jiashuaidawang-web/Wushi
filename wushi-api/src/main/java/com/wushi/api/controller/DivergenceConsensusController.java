@@ -5,9 +5,12 @@ import com.wushi.api.vo.common.JudgmentBlockVO;
 import com.wushi.api.vo.common.MarketQuery;
 import com.wushi.api.vo.page.DivergenceConsensusVO;
 import com.wushi.common.api.ApiResponse;
+import com.wushi.common.enums.DataQualityLevel;
 import com.wushi.common.enums.EngineType;
 import com.wushi.common.enums.JudgementMode;
 import com.wushi.common.enums.TargetType;
+import com.wushi.module.market.common.DataCoverageChecker;
+import com.wushi.module.market.enums.FactTable;
 import com.wushi.module.pattern.engine.DivergenceConsensusEngine;
 import com.wushi.module.pattern.model.DivergenceConsensusDetail;
 import com.wushi.module.rule.engine.core.EngineRequest;
@@ -36,10 +39,12 @@ public class DivergenceConsensusController {
             "stock_plate_relation_snapshot",
             "high_position_feedback_daily"
     );
+    private static final FactTable PRIMARY_TABLE = FactTable.STOCK_LIMIT_STATUS_DAILY;
 
     private final EngineRequestFactory engineRequestFactory;
     private final DivergenceConsensusEngine divergenceConsensusEngine;
     private final JudgmentBlockAssembler judgmentBlockAssembler;
+    private final DataCoverageChecker dataCoverageChecker;
 
     @GetMapping("/dashboard")
     public ApiResponse<DivergenceConsensusVO> dashboard(
@@ -50,6 +55,14 @@ public class DivergenceConsensusController {
             @RequestParam(required = false) String plateCode,
             @RequestParam(required = false) String plateName) {
         MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
+
+        // 数据覆盖率检查
+        DataQualityLevel coverageLevel = dataCoverageChecker.checkLevel(PRIMARY_TABLE, query.tradeDate());
+        if (coverageLevel == DataQualityLevel.LOW) {
+            return ApiResponse.ok(new DivergenceConsensusVO(query, List.of(),
+                    "数据不足，引擎结果仅供参考"));
+        }
+
         EngineRequest request = engineRequestFactory.create(
                 query.tradeDate(),
                 query.asOfDate(),
@@ -62,8 +75,14 @@ public class DivergenceConsensusController {
                 REQUIRED_TABLES,
                 requestParams(plateCode, plateName)
         );
-        JudgmentBlockVO<DivergenceConsensusDetail> judgement = judgmentBlockAssembler.toBlock(divergenceConsensusEngine.judge(request));
-        return ApiResponse.ok(new DivergenceConsensusVO(query, List.of(judgement), buildSummary(judgement)));
+        var judgement = divergenceConsensusEngine.judge(request);
+        // L2 降级标记
+        if (coverageLevel == DataQualityLevel.MEDIUM && judgement != null) {
+            judgement.setDataQualityLevel(DataQualityLevel.MEDIUM);
+        }
+        JudgmentBlockVO<DivergenceConsensusDetail> block =
+                judgmentBlockAssembler.toBlock(judgement);
+        return ApiResponse.ok(new DivergenceConsensusVO(query, List.of(block), buildSummary(block)));
     }
 
     private Map<String, Object> requestParams(String plateCode, String plateName) {

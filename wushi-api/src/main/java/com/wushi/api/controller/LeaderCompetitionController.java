@@ -5,11 +5,15 @@ import com.wushi.api.vo.common.JudgmentBlockVO;
 import com.wushi.api.vo.common.MarketQuery;
 import com.wushi.api.vo.page.LeaderCompetitionVO;
 import com.wushi.common.api.ApiResponse;
+import com.wushi.common.enums.DataQualityLevel;
 import com.wushi.common.enums.EngineType;
 import com.wushi.common.enums.JudgementMode;
 import com.wushi.common.enums.TargetType;
+import com.wushi.module.market.common.DataCoverageChecker;
+import com.wushi.common.model.JudgementResult;
 import com.wushi.module.leader.engine.LeaderCompetitionEngine;
 import com.wushi.module.leader.model.LeaderJudgementDetail;
+import com.wushi.module.market.enums.FactTable;
 import com.wushi.module.rule.engine.core.EngineRequest;
 import com.wushi.module.rule.support.EngineRequestFactory;
 import lombok.RequiredArgsConstructor;
@@ -35,10 +39,12 @@ public class LeaderCompetitionController {
             "plate_daily_snapshot",
             "stock_plate_relation_snapshot"
     );
+    private static final FactTable PRIMARY_TABLE = FactTable.STOCK_LIMIT_STATUS_DAILY;
 
     private final EngineRequestFactory engineRequestFactory;
     private final LeaderCompetitionEngine leaderCompetitionEngine;
     private final JudgmentBlockAssembler judgmentBlockAssembler;
+    private final DataCoverageChecker dataCoverageChecker;
 
     @GetMapping("/competition")
     public ApiResponse<LeaderCompetitionVO> competition(
@@ -53,10 +59,23 @@ public class LeaderCompetitionController {
             @RequestParam(required = false, defaultValue = "5") Integer candidateLimit) {
         try {
             MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
+
+            // 数据覆盖率检查
+            DataQualityLevel coverageLevel = dataCoverageChecker.checkLevel(PRIMARY_TABLE, query.tradeDate());
+            if (coverageLevel == DataQualityLevel.LOW) {
+                return ApiResponse.ok(new LeaderCompetitionVO(query, List.of(), "数据不足，引擎结果仅供参考"));
+            }
+
             EngineRequest request = createRequest(query, stockCode, stockName, plateCode, plateName);
-            List<JudgmentBlockVO<LeaderJudgementDetail>> leaderCards = leaderCompetitionEngine
-                    .judgeCandidates(request, safeLimit(candidateLimit))
-                    .stream()
+            List<JudgementResult<LeaderJudgementDetail>> judgements =
+                    leaderCompetitionEngine.judgeCandidates(request, safeLimit(candidateLimit));
+
+            // L2 降级标记
+            if (coverageLevel == DataQualityLevel.MEDIUM) {
+                judgements.forEach(j -> j.setDataQualityLevel(DataQualityLevel.MEDIUM));
+            }
+
+            List<JudgmentBlockVO<LeaderJudgementDetail>> leaderCards = judgements.stream()
                     .map(judgmentBlockAssembler::toBlock)
                     .toList();
             return ApiResponse.ok(new LeaderCompetitionVO(query, leaderCards, buildCompetitionSummary(leaderCards)));

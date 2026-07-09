@@ -5,9 +5,13 @@ import com.wushi.api.vo.common.JudgmentBlockVO;
 import com.wushi.api.vo.common.MarketQuery;
 import com.wushi.api.vo.page.RiskRadarVO;
 import com.wushi.common.api.ApiResponse;
+import com.wushi.common.enums.DataQualityLevel;
 import com.wushi.common.enums.EngineType;
 import com.wushi.common.enums.JudgementMode;
 import com.wushi.common.enums.TargetType;
+import com.wushi.module.market.common.DataCoverageChecker;
+import com.wushi.common.model.JudgementResult;
+import com.wushi.module.market.enums.FactTable;
 import com.wushi.module.risk.engine.RiskRadarEngine;
 import com.wushi.module.risk.model.RiskRadarDetail;
 import com.wushi.module.rule.engine.core.EngineRequest;
@@ -34,10 +38,12 @@ public class RiskRadarController {
             "market_breadth_daily_snapshot",
             "plate_daily_snapshot"
     );
+    private static final FactTable PRIMARY_TABLE = FactTable.HIGH_POSITION_FEEDBACK_DAILY;
 
     private final EngineRequestFactory engineRequestFactory;
     private final RiskRadarEngine riskRadarEngine;
     private final JudgmentBlockAssembler judgmentBlockAssembler;
+    private final DataCoverageChecker dataCoverageChecker;
 
     @GetMapping("/radar")
     public ApiResponse<RiskRadarVO> radar(
@@ -49,6 +55,13 @@ public class RiskRadarController {
             @RequestParam(required = false) String plateName) {
         try {
             MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
+
+            // 数据覆盖率检查
+            DataQualityLevel coverageLevel = dataCoverageChecker.checkLevel(PRIMARY_TABLE, query.tradeDate());
+            if (coverageLevel == DataQualityLevel.LOW) {
+                return ApiResponse.ok(new RiskRadarVO(query, List.of(), "数据不足，引擎结果仅供参考"));
+            }
+
             EngineRequest request = engineRequestFactory.create(
                     query.tradeDate(),
                     query.asOfDate(),
@@ -61,7 +74,14 @@ public class RiskRadarController {
                     REQUIRED_TABLES,
                     plateCode == null || plateCode.isBlank() ? Map.of() : Map.of("plateCode", plateCode)
             );
-            JudgmentBlockVO<RiskRadarDetail> riskCard = judgmentBlockAssembler.toBlock(riskRadarEngine.judge(request));
+            JudgementResult<RiskRadarDetail> judgement = riskRadarEngine.judge(request);
+
+            // L2 降级标记
+            if (coverageLevel == DataQualityLevel.MEDIUM && judgement != null) {
+                judgement.setDataQualityLevel(DataQualityLevel.MEDIUM);
+            }
+
+            JudgmentBlockVO<RiskRadarDetail> riskCard = judgmentBlockAssembler.toBlock(judgement);
             return ApiResponse.ok(new RiskRadarVO(query, List.of(riskCard), buildSummary(riskCard)));
         } catch (Exception ex) {
             MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);

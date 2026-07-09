@@ -585,14 +585,14 @@ function HistoryPage({ query }: { query: Query }) {
     const params = new URLSearchParams();
     if (query.tradeDate) params.set("tradeDate", query.tradeDate);
     if (query.ruleVersion) params.set("ruleVersion", query.ruleVersion);
-    fetch(`${API_BASE}/api/rule/batch-history?${params.toString()}`)
+    fetch(`${API_BASE}/api/batch/history?${params.toString()}`)
       .then((res) => readApiResponse<BatchHistoryRecord[]>(res))
       .then((json) => {
         if (cancelled) return;
         setRecords(json.data ?? []);
       })
-      .catch(() => {
-        if (!cancelled) setRecords(buildMockHistory());
+      .catch((err) => {
+        if (!cancelled) setError(err.message || "查询跑批历史失败");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -712,61 +712,16 @@ function HistoryPage({ query }: { query: Query }) {
   );
 }
 
-function buildMockHistory(): BatchHistoryRecord[] {
-  const days = ["2026-07-09", "2026-07-08", "2026-07-07", "2026-07-06", "2026-07-05", "2026-07-04", "2026-07-03"];
-  return days.map((tradeDate, i): BatchHistoryRecord => {
-    const statuses: BatchHistoryRecord["status"][] = ["SUCCESS", "SUCCESS", "FAILED", "RUNNING", "SUCCESS", "PARTIAL", "SUCCESS"];
-    const status = statuses[i] ?? "SUCCESS";
-    const totalSteps = 8;
-    const completedSteps = status === "RUNNING" ? 5 : status === "FAILED" ? 3 : status === "PARTIAL" ? 6 : totalSteps;
-    const duration = status === "RUNNING" ? undefined : (80 + i * 15) * 1000;
-    const affectedRows = status === "SUCCESS" ? 2400 + i * 50 : status === "PARTIAL" ? 1200 : status === "RUNNING" ? 0 : 0;
-    const errorMessage = status === "FAILED"
-      ? `[${tradeDate}] 跑批失败：步骤 4/8「因子计算」异常\n  Caused by: java.net.SocketTimeoutException: Read timed out after 30000ms\n  at com.astock.module.spider.DcApiClient.fetch(DcApiClient.java:156)\n  at com.astock.module.service.BatchRunner.run(BatchRunner.java:89)\n  ✦ 建议：检查数据源连接或增加超时配置`
-      : undefined;
-    const stepResults = status === "FAILED" || status === "PARTIAL" ? [
-      { step: "数据拉取", status: "SUCCESS" },
-      { step: "清洗", status: "SUCCESS" },
-      { step: "特征计算", status: "SUCCESS" },
-      { step: "因子计算", status: i >= 2 ? "FAILED" : "SUCCESS", message: i >= 2 ? "SocketTimeoutException" : undefined },
-      { step: "推理", status: "SUCCESS" },
-      { step: "验证", status: "SUCCESS" },
-      { step: "沉淀", status: status === "PARTIAL" ? "SUCCESS" : "SUCCESS" },
-      { step: "归档", status: "SUCCESS" }
-    ] : undefined;
-    return {
-      tradeDate,
-      batchId: `BATCH-${tradeDate.replace(/-/g, "")}-001`,
-      ruleVersion: "v0.1.0",
-      engineType: "RULE_ENGINE",
-      totalSteps,
-      completedSteps,
-      status,
-      startTime: `${tradeDate} 09:30:00`,
-      endTime: duration !== undefined ? `${tradeDate} 09:${30 + Math.floor((duration / 60000))}:${(duration % 60000 / 1000).toFixed(0).padStart(2, "0")}` : undefined,
-      duration,
-      affectedRows,
-      errorMessage,
-      stepResults
-    };
-  });
-}
 
 
 
-// ---- Data Health Panel (P2-3, MOCK: 等后端就绪替换) ----
+
+// ---- Data Health Panel (P2-3) ----
 type DataHealthData = {
   tradeDate: string;
   crawlCoverage: number;
   tableCoverage: number;
   lastUpdate: string;
-};
-
-const MOCK_DATA_HEALTH: DataHealthData = {
-  tradeDate: "2026-07-09",
-  crawlCoverage: 0.92,
-  tableCoverage: 0.88,
-  lastUpdate: "2026-07-09 09:45:32",
 };
 
 function coverageColor(pct: number) {
@@ -784,7 +739,7 @@ function DataHealthCard() {
     fetch(`${API_BASE}/api/market/data-health`)
       .then((res) => readApiResponse<DataHealthData>(res))
       .then((json) => setHealth(json.data))
-      .catch(() => setHealth(MOCK_DATA_HEALTH)) // MOCK: 等后端就绪替换
+      .catch((err) => setHealthError(err.message || "查询数据健康失败"))
       .finally(() => setLoading(false));
   }, []);
 

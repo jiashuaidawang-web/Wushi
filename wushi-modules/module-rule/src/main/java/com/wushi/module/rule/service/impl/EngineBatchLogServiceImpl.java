@@ -1,6 +1,10 @@
 package com.wushi.module.rule.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPAGE;
+import com.baomidou.mybatisplus.extension.plugins.Page;
+import java.time.LocalDate;
+
 import com.wushi.common.enums.BatchStatus;
 import com.wushi.common.enums.StepStatus;
 import com.wushi.module.rule.domain.entity.EngineBatchRunLogEntity;
@@ -133,4 +137,19 @@ public class EngineBatchLogServiceImpl implements EngineBatchLogService {
                 .last("limit 1"));
         return entity == null ? new EngineBatchStepLogEntity() : entity;
     }
+
+    @Override
+    public IPage<EngineBatchRunLogEntity> listHistory(LocalDate tradeDate, String status, int page, int size) {
+        Page<EngineBatchRunLogEntity> pageParam = new Page<>(page, size);
+        LambdaQueryWrapper<EngineBatchRunLogEntity> wrapper = new LambdaQueryWrapper<>();
+        if (tradeDate != null) {
+            wrapper.eq(EngineBatchRunLogEntity::getTradeDate, tradeDate);
+        }
+        if (status != null && !status.isBlank()) {
+            wrapper.eq(EngineBatchRunLogEntity::getStatus, status);
+        }
+        wrapper.orderByDesc(EngineBatchRunLogEntity::getCreatedAt);
+        return runLogMapper.selectPage(pageParam, wrapper);
+    }
+
 }

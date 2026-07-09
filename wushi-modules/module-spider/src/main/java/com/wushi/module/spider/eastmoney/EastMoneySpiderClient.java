@@ -1,8 +1,7 @@
 package com.wushi.module.spider.eastmoney;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wushi.module.spider.common.JsonpParser;
 import com.wushi.module.spider.common.SpiderHttpClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +23,7 @@ public class EastMoneySpiderClient {
     private static final DateTimeFormatter BASIC_DATE = DateTimeFormatter.BASIC_ISO_DATE;
 
     private final SpiderHttpClient httpClient;
-    private final ObjectMapper objectMapper;
+    private final JsonpParser jsonpParser;
 
     /**
      * 分页获取股票列表或板块列表
@@ -38,7 +37,7 @@ public class EastMoneySpiderClient {
             String url = String.format(endpoint.getUrlTemplate(), page, System.currentTimeMillis());
             try {
                 String body = httpClient.get(url, eastMoneyHeaders());
-                JsonNode root = parseJsonp(body);
+                JsonNode root = jsonpParser.parse(body);
                 JsonNode data = root.path("data");
                 total = data.path("total").asInt(total);
                 totalPage = Math.max(1, (int) Math.ceil(total / (double) PAGE_SIZE));
@@ -63,7 +62,7 @@ public class EastMoneySpiderClient {
         String url = String.format(endpoint.getUrlTemplate(), tradeDate.format(BASIC_DATE), System.currentTimeMillis());
         try {
             String body = httpClient.get(url, eastMoneyHeaders());
-            JsonNode root = parseJsonp(body);
+            JsonNode root = jsonpParser.parse(body);
             JsonNode data = root.path("data");
             int total = data.path("tc").asInt(0);
             List<JsonNode> rows = new ArrayList<>();
@@ -94,7 +93,7 @@ public class EastMoneySpiderClient {
             String url = String.format(template, cb, bkNumber, page, System.currentTimeMillis());
             try {
                 String body = httpClient.get(url, eastMoneyHeaders());
-                JsonNode root = parseJsonp(body);
+                JsonNode root = jsonpParser.parse(body);
                 JsonNode data = root.path("data");
                 if (data.isMissingNode() || data.isNull()) break;
                 total = data.path("total").asInt(total);
@@ -109,28 +108,6 @@ public class EastMoneySpiderClient {
             }
         }
         return new EastMoneyPageResult(total, allRows);
-    }
-
-    // ========== 工具方法 ==========
-
-    /**
-     * 解析 JSONP 响应：剥离回调函数包裹，返回 data 节点
-     */
-    private JsonNode parseJsonp(String body) {
-        if (body == null || body.isBlank()) {
-            return objectMapper.createObjectNode();
-        }
-        String trimmed = body.trim();
-        int start = trimmed.indexOf('(');
-        int end = trimmed.lastIndexOf(')');
-        try {
-            if (start >= 0 && end > start) {
-                return objectMapper.readTree(trimmed.substring(start + 1, end));
-            }
-            return objectMapper.readTree(trimmed);
-        } catch (JsonProcessingException e) {
-            throw new IllegalArgumentException("非法 JSON 内容: " + trimmed, e);
-        }
     }
 
     private Map<String, String> eastMoneyHeaders() {

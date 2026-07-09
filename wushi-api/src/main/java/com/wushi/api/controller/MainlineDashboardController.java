@@ -5,14 +5,17 @@ import com.wushi.api.vo.common.JudgmentBlockVO;
 import com.wushi.api.vo.common.MarketQuery;
 import com.wushi.api.vo.page.MainlineDashboardVO;
 import com.wushi.common.api.ApiResponse;
+import com.wushi.common.enums.DataQualityLevel;
 import com.wushi.common.enums.EngineType;
 import com.wushi.common.enums.JudgementMode;
 import com.wushi.common.enums.TargetType;
+import com.wushi.module.market.common.DataCoverageChecker;
 import com.wushi.common.model.JudgementResult;
 import com.wushi.module.mainline.engine.MainlineRecognitionEngine;
 import com.wushi.module.mainline.model.MainlineCandidate;
 import com.wushi.module.mainline.model.MainlineJudgementDetail;
 import com.wushi.module.mainline.service.MainlineCandidateSelector;
+import com.wushi.module.market.enums.FactTable;
 import com.wushi.module.rule.engine.core.EngineRequest;
 import com.wushi.module.rule.support.EngineRequestFactory;
 import lombok.RequiredArgsConstructor;
@@ -36,11 +39,13 @@ public class MainlineDashboardController {
             "plate_daily_snapshot",
             "capital_flow_daily_snapshot"
     );
+    private static final FactTable PRIMARY_TABLE = FactTable.PLATE_DAILY_SNAPSHOT;
 
     private final EngineRequestFactory engineRequestFactory;
     private final MainlineRecognitionEngine mainlineRecognitionEngine;
     private final MainlineCandidateSelector mainlineCandidateSelector;
     private final JudgmentBlockAssembler judgmentBlockAssembler;
+    private final DataCoverageChecker dataCoverageChecker;
 
     @GetMapping("/dashboard")
     public ApiResponse<MainlineDashboardVO> dashboard(
@@ -53,7 +58,15 @@ public class MainlineDashboardController {
             @RequestParam(required = false, defaultValue = "5") Integer candidateLimit) {
         try {
             MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
-            List<JudgmentBlockVO<MainlineJudgementDetail>> mainlineCards = buildMainlineCards(query, plateCode, plateName, candidateLimit);
+
+            // 数据覆盖率检查
+            DataQualityLevel coverageLevel = dataCoverageChecker.checkLevel(PRIMARY_TABLE, query.tradeDate());
+            if (coverageLevel == DataQualityLevel.LOW) {
+                return ApiResponse.ok(new MainlineDashboardVO(query, List.of(), "数据不足，引擎结果仅供参考"));
+            }
+
+            List<JudgmentBlockVO<MainlineJudgementDetail>> mainlineCards = buildMainlineCards(
+                    query, plateCode, plateName, candidateLimit, coverageLevel);
             String summary = buildCompetitionSummary(mainlineCards);
             return ApiResponse.ok(new MainlineDashboardVO(query, mainlineCards, summary));
         } catch (Exception ex) {
@@ -66,36 +79,49 @@ public class MainlineDashboardController {
             MarketQuery query,
             String plateCode,
             String plateName,
-            Integer candidateLimit) {
+            Integer candidateLimit,
+            DataQualityLevel coverageLevel) {
         if (plateCode != null && !plateCode.isBlank()) {
             EngineRequest request = createRequest(query, plateCode, plateName, Map.of());
-            var judgement = mainlineRecognitionEngine.judge(request);
+            JudgementResult<MainlineJudgementDetail> judgement = mainlineRecognitionEngine.judge(request);
             if (judgement == null) {
                 judgement = emptyResult(query);
             }
+            applyCoverageLevel(judgement, coverageLevel);
             return List.of(judgmentBlockAssembler.toBlock(judgement));
         }
 
         List<MainlineCandidate> candidates = mainlineCandidateSelector.selectCandidates(query.tradeDate(), safeLimit(candidateLimit));
         if (candidates.isEmpty()) {
             EngineRequest request = createRequest(query, null, null, Map.of());
-            var judgement = mainlineRecognitionEngine.judge(request);
+            JudgementResult<MainlineJudgementDetail> judgement = mainlineRecognitionEngine.judge(request);
             if (judgement == null) {
                 judgement = emptyResult(query);
             }
+            applyCoverageLevel(judgement, coverageLevel);
             return List.of(judgmentBlockAssembler.toBlock(judgement));
         }
 
         return candidates.stream()
                 .map(candidate -> {
                     EngineRequest request = createRequest(query, candidate.plateCode(), candidate.plateName(), candidateParams(candidate));
-                    var judgement = mainlineRecognitionEngine.judge(request);
+                    JudgementResult<MainlineJudgementDetail> judgement = mainlineRecognitionEngine.judge(request);
                     if (judgement == null) {
                         judgement = emptyResult(query);
                     }
+                    applyCoverageLevel(judgement, coverageLevel);
                     return judgmentBlockAssembler.toBlock(judgement);
                 })
                 .toList();
+    }
+
+    /**
+     * L2 降级: 覆盖率不足时覆盖 JudgementResult 的 dataQualityLevel
+     */
+    private void applyCoverageLevel(JudgementResult<MainlineJudgementDetail> judgement, DataQualityLevel coverageLevel) {
+        if (coverageLevel == DataQualityLevel.MEDIUM) {
+            judgement.setDataQualityLevel(DataQualityLevel.MEDIUM);
+        }
     }
 
     private EngineRequest createRequest(MarketQuery query, String plateCode, String plateName, Map<String, Object> params) {

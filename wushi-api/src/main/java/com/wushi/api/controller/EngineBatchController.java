@@ -3,8 +3,18 @@ package com.wushi.api.controller;
 import com.wushi.common.api.ApiResponse;
 import com.wushi.common.enums.JudgementMode;
 import com.wushi.common.enums.RunMode;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.wushi.module.rule.domain.entity.EngineBatchRunLogEntity;
+import com.wushi.module.rule.service.EngineBatchLogService;
+import org.springframework.web.bind.annotation.GetMapping;
+import com.wushi.common.enums.JudgementMode;
+import com.wushi.common.enums.RunMode;
 import com.wushi.module.agent.audit.model.HistoryReplayRequest;
 import com.wushi.module.agent.audit.model.HistoryReplayResult;
+import com.wushi.module.agent.audit.service.HistoryReplayService;
+import com.wushi.module.rule.engine.core.EngineRunContext;
+import com.wushi.module.rule.engine.core.EngineStepResult;
+import com.wushi.module.rule.engine.task.EngineBatchOrchestrator;
 import com.wushi.module.agent.audit.service.HistoryReplayService;
 import com.wushi.module.rule.engine.core.EngineRunContext;
 import com.wushi.module.rule.engine.core.EngineStepResult;
@@ -27,6 +37,7 @@ public class EngineBatchController {
 
     private final EngineBatchOrchestrator engineBatchOrchestrator;
     private final HistoryReplayService historyReplayService;
+    private final EngineBatchLogService engineBatchLogService;
 
     @PostMapping("/daily")
     public ApiResponse<List<EngineStepResult>> runDaily(
@@ -51,5 +62,14 @@ public class EngineBatchController {
     @PostMapping("/history-replay")
     public ApiResponse<HistoryReplayResult> runHistoryReplay(@RequestBody HistoryReplayRequest request) {
         return ApiResponse.ok(historyReplayService.replay(request));
+    }
+
+    @GetMapping("/history")
+    public ApiResponse<IPage<EngineBatchRunLogEntity>> listHistory(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.ok(engineBatchLogService.listHistory(tradeDate, status, page, size));
     }
 }

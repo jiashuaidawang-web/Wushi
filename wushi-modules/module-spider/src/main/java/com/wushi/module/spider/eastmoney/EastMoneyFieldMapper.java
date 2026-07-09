@@ -5,6 +5,7 @@ import com.wushi.module.market.domain.row.*;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -58,6 +59,8 @@ public class EastMoneyFieldMapper {
 
     /**
      * 板块日K映射
+     * 东财字段同 stock_daily_kline: f12=plateCode, f14=plateName, f17=open, f15=high, f16=low, f2=close
+     * f18=preClose, f3=changePct, f5=volume, f6=amount, f8=turnoverRate
      */
     public StockPlateDailyKlineRow toPlateDailyKline(LocalDate tradeDate, JsonNode node) {
         return new StockPlateDailyKlineRow(
@@ -146,6 +149,79 @@ public class EastMoneyFieldMapper {
         );
     }
 
+    /**
+     * 指数日K映射
+     * 东财字段: f12=indexCode, f14=indexName, f17=open, f15=high, f16=low, f2=close
+     * f18=preClose, f3=changePct, f5=volume, f6=amount
+     * indexType 由调用方根据 f13(市场) 判定, 此处默认传空
+     */
+    public IndexDailyKlineRow toIndexDailyKline(LocalDate tradeDate, JsonNode node) {
+        return new IndexDailyKlineRow(
+                tradeDate,
+                text(node, "f12"),     // indexCode
+                text(node, "f14"),     // indexName
+                "",                    // indexType (接口无此字段, 默认空)
+                decimal(node, "f17"),  // open
+                decimal(node, "f15"),  // high
+                decimal(node, "f16"),  // low
+                decimal(node, "f2"),   // close
+                decimal(node, "f18"),  // preClose
+                decimal(node, "f3"),   // changePct
+                longValue(node, "f5"), // volume
+                decimal(node, "f6"),   // amount
+                "1"                    // source: 1=东财
+        );
+    }
+
+    /**
+     * 资金流向日快照映射 (个股维度)
+     * 东财推送资金流向字段 (push2.eastmoney.com):
+     *   f12=stockCode, f14=stockName
+     *   f62=主力净流入-净额(mainNetInflow)
+     *   f66=超大单净流入-净额(superLargeNetInflow)
+     *   f72=大单净流入-净额(largeNetInflow)
+     *   f78=中单净流入-净额(mediumNetInflow)
+     *   f84=小单净流入-净额(smallNetInflow)
+     * 注意: 资金流向 API 的单位为元, 接口直接返回元
+     */
+    public CapitalFlowDailySnapshotRow toCapitalFlowDailySnapshot(LocalDate tradeDate, JsonNode node) {
+        return new CapitalFlowDailySnapshotRow(
+                tradeDate,
+                "STOCK",                       // targetType: 个股维度
+                text(node, "f12"),             // targetCode (stockCode)
+                text(node, "f14"),             // targetName (stockName)
+                decimal(node, "f62"),          // mainNetInflow
+                decimal(node, "f66"),          // superLargeNetInflow
+                decimal(node, "f72"),          // largeNetInflow
+                decimal(node, "f78"),          // mediumNetInflow
+                decimal(node, "f84"),          // smallNetInflow
+                "1"                            // source: 1=东财
+        );
+    }
+
+    /**
+     * 涨停盘中事件映射 (从涨停池数据中提取首封事件)
+     * 涨停池字段: c=stockCode, n=stockName, p=price(分), fbt=首次封板时间(HHmmss),
+     * lbt=最后封板时间, zbc=炸板次数, fund=封单资金
+     * <p>
+     * 事件类型: 首封 (FIRST_SEAL) - 从 fbt 提取首次封板时间
+     * 后续开板(BREAK)/回封(RE_SEAL)事件需要 pool 明细时间序列, 涨停池接口仅返回聚合数据,
+     * 此处仅提取首封事件. 开板/回封事件需接入专门的 tick 数据源.
+     */
+    public StockLimitIntradayEventRow toLimitIntradayEventRow(LocalDate tradeDate, JsonNode node) {
+        return new StockLimitIntradayEventRow(
+                tradeDate,
+                parseDateTime(tradeDate, timeText(node, "fbt")),  // eventTime: 首次封板时间
+                text(node, "c"),                                  // stockCode
+                text(node, "n"),                                  // stockName
+                "FIRST_SEAL",                                     // eventType: 首封
+                convertFenToYuan(node, "p"),                      // price: 分→元
+                decimal(node, "fund"),                            // sealAmount: 封单资金
+                1,                                                // eventSequence: 首封固定为1
+                "1"                                               // source: 1=东财
+        );
+    }
+
     // ========== 工具方法 ==========
 
     private String text(JsonNode node, String field) {
@@ -204,5 +280,16 @@ public class EastMoneyFieldMapper {
         } catch (Exception ignored) {
         }
         return null;
+    }
+
+    /**
+     * 将分为单位的金额转换为元 (除以100, 保留2位小数)
+     */
+    private BigDecimal convertFenToYuan(JsonNode node, String field) {
+        BigDecimal fen = decimal(node, field);
+        if (fen.compareTo(BigDecimal.ZERO) == 0) {
+            return BigDecimal.ZERO;
+        }
+        return fen.divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
     }
 }

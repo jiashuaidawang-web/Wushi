@@ -4,12 +4,15 @@ import com.wushi.api.assembler.JudgmentBlockAssembler;
 import com.wushi.api.vo.common.MarketQuery;
 import com.wushi.api.vo.page.CycleDashboardVO;
 import com.wushi.common.api.ApiResponse;
+import com.wushi.common.enums.DataQualityLevel;
 import com.wushi.common.enums.EngineType;
 import com.wushi.common.enums.JudgementMode;
 import com.wushi.common.enums.TargetType;
+import com.wushi.module.market.common.DataCoverageChecker;
 import com.wushi.common.model.JudgementResult;
 import com.wushi.module.emotion.engine.CycleRecognitionEngine;
 import com.wushi.module.emotion.model.CycleJudgementDetail;
+import com.wushi.module.market.enums.FactTable;
 import com.wushi.module.rule.engine.core.EngineRequest;
 import com.wushi.module.rule.support.EngineRequestFactory;
 import lombok.RequiredArgsConstructor;
@@ -33,10 +36,12 @@ public class CycleDashboardController {
             "market_breadth_daily_snapshot",
             "stock_limit_status_daily"
     );
+    private static final FactTable PRIMARY_TABLE = FactTable.MARKET_BREADTH_DAILY_SNAPSHOT;
 
     private final EngineRequestFactory engineRequestFactory;
     private final CycleRecognitionEngine cycleRecognitionEngine;
     private final JudgmentBlockAssembler judgmentBlockAssembler;
+    private final DataCoverageChecker dataCoverageChecker;
 
     @GetMapping("/dashboard")
     public ApiResponse<CycleDashboardVO> dashboard(
@@ -46,6 +51,13 @@ public class CycleDashboardController {
             @RequestParam(required = false) String ruleVersion) {
         try {
             MarketQuery query = ApiQuerySupport.query(tradeDate, asOfDate, judgementMode, ruleVersion);
+
+            // 数据覆盖率检查
+            DataQualityLevel coverageLevel = dataCoverageChecker.checkLevel(PRIMARY_TABLE, query.tradeDate());
+            if (coverageLevel == DataQualityLevel.LOW) {
+                return ApiResponse.ok(degradedVO(query, "数据不足，引擎结果仅供参考"));
+            }
+
             EngineRequest request = engineRequestFactory.create(
                     query.tradeDate(),
                     query.asOfDate(),
@@ -58,10 +70,16 @@ public class CycleDashboardController {
                     REQUIRED_TABLES,
                     Map.of()
             );
-            var judgement = cycleRecognitionEngine.judge(request);
+            JudgementResult<CycleJudgementDetail> judgement = cycleRecognitionEngine.judge(request);
             if (judgement == null) {
                 judgement = emptyResult(query);
             }
+
+            // L2 降级: 在 meta 中附加 dataQualityLevel
+            if (coverageLevel == DataQualityLevel.MEDIUM) {
+                judgement.setDataQualityLevel(DataQualityLevel.MEDIUM);
+            }
+
             CycleJudgementDetail detail = judgement.getDetail();
             String pathSummary = detail == null ? "周期路径暂不可用" : detail.stageReason();
             return ApiResponse.ok(new CycleDashboardVO(
@@ -92,5 +110,13 @@ public class CycleDashboardController {
                 .conclusion("暂无数据")
                 .ruleVersion(query.ruleVersion())
                 .build();
+    }
+
+    private CycleDashboardVO degradedVO(MarketQuery query, String message) {
+        return new CycleDashboardVO(
+                query,
+                judgmentBlockAssembler.toBlock(emptyResult(query)),
+                message
+        );
     }
 }
