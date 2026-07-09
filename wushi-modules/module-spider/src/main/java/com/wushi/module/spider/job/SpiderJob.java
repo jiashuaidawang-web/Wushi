@@ -20,7 +20,7 @@ import com.wushi.module.spider.provider.market.CapitalFlowProvider;
 import com.wushi.module.spider.provider.plate.PlateDimensionProvider;
 import com.wushi.module.spider.provider.plate.StockPlateRelationProvider;
 import com.wushi.module.spider.service.SpiderIngestionService;
-import com.wushi.module.spider.ths.ThsSpiderServiceImpl;
+import com.wushi.module.spider.ths.ThsPlaywrightSpiderServiceImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -30,7 +30,7 @@ import java.util.*;
 
 /**
  * 爬虫跑批任务编排器
- * 协调东财API + 同花顺Selenium 双数据源抓取
+ * 协调东财API + 同花顺Playwright 双数据源抓取
  * 支持断点续传: 同一天同一 provider 已成功则跳过
  */
 @Component
@@ -41,7 +41,7 @@ public class SpiderJob {
     private final EastMoneySpiderClient eastMoneySpiderClient;
     private final EastMoneyFieldMapper fieldMapper;
     private final SpiderIngestionService ingestionService;
-    private final ThsSpiderServiceImpl thsSpiderService;
+    private final ThsPlaywrightSpiderServiceImpl thsSpiderService;
     private final SpiderCheckpointService checkpointService;
 
     // 东财 Provider (通过 Spring DI 注入)

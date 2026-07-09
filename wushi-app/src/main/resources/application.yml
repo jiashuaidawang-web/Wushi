@@ -27,3 +27,17 @@ wushi:
     default-rule-version: v0.1.0
   selenium:
     remote-url: http://localhost:4444/wd/hub
+  spider:
+    ths:
+      browser:
+        # 同花顺代理池 (格式: ip:port 或 protocol://ip:port)
+        proxy-pool:
+          - 127.0.0.1:7890
+        max-proxy-retries: 3
+        direct-first: true
+    eastmoney:
+      # 东财代理池 (独立配置, 格式同上)
+      proxy-pool:
+        - 127.0.0.1:7890
+      max-proxy-retries: 3
+      direct-first: true
