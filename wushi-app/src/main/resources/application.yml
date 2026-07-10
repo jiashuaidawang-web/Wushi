@@ -6,7 +6,7 @@ spring:
     name: wushi
   datasource:
     mysql:
-      jdbc-url: jdbc:mysql://124.223.220.245:3306/wusi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      jdbc-url: jdbc:mysql://124.223.220.245:3306/wushi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       username: root
       password: astock_root
       driver-class-name: com.mysql.cj.jdbc.Driver
@@ -30,26 +30,24 @@ wushi:
   spider:
     ths:
       browser:
-        proxy-pool:
-          - 58.19.54.157:16430
+        proxy-pool: []
         max-proxy-retries: 3
         direct-first: true
         kuaidaili:
-          enabled: true
+          enabled: false
           api-url: "https://dps.kdlapi.com/api/getdps/?secret_id=omb7vq7v5keahv63y6rx&signature=b5nc6bmmjzcmlfvs9h36enz8k1twt8m0&num=1&format=text&sep=1"
           num: 1
           format: text
           timeout-ms: 5000
-          max-uses-per-ip: 5
+          max-uses-per-ip: 1
     eastmoney:
-      proxy-pool:
-        - 58.19.54.157:16430
+      proxy-pool: []
       max-proxy-retries: 3
       direct-first: true
       kuaidaili:
-        enabled: true
+        enabled: false
         api-url: "https://dps.kdlapi.com/api/getdps/?secret_id=omb7vq7v5keahv63y6rx&signature=b5nc6bmmjzcmlfvs9h36enz8k1twt8m0&num=1&format=text&sep=1"
         num: 1
         format: text
         timeout-ms: 5000
-        max-uses-per-ip: 5
+        max-uses-per-ip: 1

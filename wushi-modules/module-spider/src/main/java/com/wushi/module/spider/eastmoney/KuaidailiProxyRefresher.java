@@ -34,6 +34,7 @@ public class KuaidailiProxyRefresher {
   private final ConcurrentHashMap<String, AtomicInteger> useCount = new ConcurrentHashMap<>();
 
   public synchronized String nextProxy() {
+    log.info("[Kuaidaili] nextProxy 调用: enabled={}, apiUrl={}", properties.isKuaidailiEnabled(), properties.getKuaidailiApiUrl());
     if (!properties.isKuaidailiEnabled()) return null;
     if (currentProxy != null) {
       AtomicInteger count = useCount.get(currentProxy);
@@ -47,6 +48,7 @@ public class KuaidailiProxyRefresher {
   }
 
   public String refreshOnBlock() {
+    log.info("[Kuaidaili] refreshOnBlock 调用: enabled={}, apiUrl={}", properties.isKuaidailiEnabled(), properties.getKuaidailiApiUrl());
     if (!properties.isKuaidailiEnabled()) return null;
     log.warn("检测到403/block, 强制刷新快代理IP");
     return refreshProxyInternal();

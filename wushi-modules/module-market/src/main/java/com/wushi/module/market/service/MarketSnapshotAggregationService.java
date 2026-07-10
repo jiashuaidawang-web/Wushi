@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import javax.sql.DataSource;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -22,16 +23,25 @@ public class MarketSnapshotAggregationService {
     @Qualifier("clickHouseJdbcTemplate")
     private final JdbcTemplate clickHouseJdbcTemplate;
 
+    @Qualifier("clickHouseDataSource")
+    private final DataSource clickHouseDataSource;
+
     /**
      * 聚合板块每日快照
      */
     public int aggregatePlateDailySnapshot(LocalDate tradeDate) {
         log.info("===== 开始聚合 plate_daily_snapshot: tradeDate={} =====", tradeDate);
+        log.info("[DEBUG] ClickHouse DataSource URL: {}", getDataSourceUrl());
 
-        clickHouseJdbcTemplate.update(
-            "ALTER TABLE wushi.plate_daily_snapshot DELETE WHERE trade_date = ?",
-            tradeDate.toString()
-        );
+        try {
+            String deleteSql = "ALTER TABLE wushi.plate_daily_snapshot DELETE WHERE trade_date = ?";
+            log.info("[DEBUG] 执行SQL: {}", deleteSql);
+            clickHouseJdbcTemplate.update(deleteSql, tradeDate.toString());
+            log.info("[DEBUG] plate_daily_snapshot 旧数据清理完成");
+        } catch (Exception e) {
+            log.error("[DEBUG] plate_daily_snapshot DELETE 失败: {}", e.getMessage());
+            throw e;
+        }
 
         String sql = """
             INSERT INTO wushi.plate_daily_snapshot
@@ -73,6 +83,7 @@ public class MarketSnapshotAggregationService {
             GROUP BY k.trade_date, r.plate_code, d.plate_name, d.plate_type
             """;
 
+        log.info("[DEBUG] 执行 plate_daily_snapshot INSERT 聚合...");
         int inserted = clickHouseJdbcTemplate.update(sql, tradeDate.toString());
         log.info("===== plate_daily_snapshot 聚合完成: tradeDate={}, inserted={} =====", tradeDate, inserted);
         return inserted;
@@ -83,11 +94,17 @@ public class MarketSnapshotAggregationService {
      */
     public int aggregateMarketBreadthDailySnapshot(LocalDate tradeDate) {
         log.info("===== 开始聚合 market_breadth_daily_snapshot: tradeDate={} =====", tradeDate);
+        log.info("[DEBUG] ClickHouse DataSource URL: {}", getDataSourceUrl());
 
-        clickHouseJdbcTemplate.update(
-            "ALTER TABLE wushi.market_breadth_daily_snapshot DELETE WHERE trade_date = ?",
-            tradeDate.toString()
-        );
+        try {
+            String deleteSql = "ALTER TABLE wushi.market_breadth_daily_snapshot DELETE WHERE trade_date = ?";
+            log.info("[DEBUG] 执行SQL: {}", deleteSql);
+            clickHouseJdbcTemplate.update(deleteSql, tradeDate.toString());
+            log.info("[DEBUG] market_breadth_daily_snapshot 旧数据清理完成");
+        } catch (Exception e) {
+            log.error("[DEBUG] market_breadth_daily_snapshot DELETE 失败: {}", e.getMessage());
+            throw e;
+        }
 
         // 使用窗口函数计算 MA5/MA10/MA20
         String sql = """
@@ -128,6 +145,7 @@ public class MarketSnapshotAggregationService {
             )
             """;
 
+        log.info("[DEBUG] 执行 market_breadth_daily_snapshot INSERT 聚合...");
         int inserted = clickHouseJdbcTemplate.update(sql, tradeDate.toString());
         log.info("===== market_breadth_daily_snapshot 聚合完成: tradeDate={}, inserted={} =====", tradeDate, inserted);
         return inserted;
@@ -147,5 +165,13 @@ public class MarketSnapshotAggregationService {
         result.put("breadthCount", breadthCount);
 
         return result;
+    }
+
+    private String getDataSourceUrl() {
+        try {
+            return clickHouseDataSource.getConnection().getMetaData().getURL();
+        } catch (Exception e) {
+            return "UNKNOWN: " + e.getMessage();
+        }
     }
 }

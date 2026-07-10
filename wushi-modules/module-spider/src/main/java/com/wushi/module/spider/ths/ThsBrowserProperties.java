@@ -9,7 +9,7 @@ import java.util.List;
 
 @Data
 @Component
-@ConfigurationProperties(prefix = "spider.ths.browser")
+@ConfigurationProperties(prefix = "wushi.spider.ths.browser")
 public class ThsBrowserProperties {
 
     /**

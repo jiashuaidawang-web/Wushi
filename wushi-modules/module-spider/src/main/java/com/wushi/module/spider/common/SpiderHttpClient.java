@@ -2,18 +2,16 @@ package com.wushi.module.spider.common;
 
 import org.springframework.http.RequestEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.net.*;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Map;
+import java.util.*;
 
 @Component
 public class SpiderHttpClient {
@@ -27,6 +25,7 @@ public class SpiderHttpClient {
                 .build();
     }
 
+    /** 基础 GET, 返回 body */
     public String get(String url) {
         return get(url, null, null);
     }
@@ -36,9 +35,7 @@ public class SpiderHttpClient {
     }
 
     public String get(String url, Map<String, String> headers, String proxyAddress) {
-        var builder = RequestEntity.get(url)
-                .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-                .header(HttpHeaders.ACCEPT, "application/json,text/javascript,*/*;q=0.8");
+        var builder = RequestEntity.get(url);
         if (headers != null) {
             headers.forEach(builder::header);
         }
@@ -46,45 +43,21 @@ public class SpiderHttpClient {
         return template.exchange(builder.build(), String.class).getBody();
     }
 
-    public String getByUrlConnection(String url, Map<String, String> headers, String proxyAddress) {
-        return getByUrlConnection(url, headers, proxyAddress, 10_000, 20_000);
-    }
-
-    public String getByUrlConnection(String url, Map<String, String> headers, String proxyAddress,
-                                     int connectTimeoutMillis, int readTimeoutMillis) {
-        HttpURLConnection connection = null;
-        try {
-            URL target = new URL(url);
-            connection = StringUtils.hasText(proxyAddress)
-                    ? (HttpURLConnection) target.openConnection(proxy(proxyAddress))
-                    : (HttpURLConnection) target.openConnection();
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(Math.max(1_000, connectTimeoutMillis));
-            connection.setReadTimeout(Math.max(1_000, readTimeoutMillis));
-            connection.setRequestProperty("User-Agent", "Mozilla/5.0");
-            if (headers != null) {
-                headers.forEach(connection::setRequestProperty);
-            }
-            int statusCode = connection.getResponseCode();
-            if (statusCode < 200 || statusCode >= 300) {
-                throw new IllegalStateException("HTTP GET failed, status=" + statusCode + ", url=" + url);
-            }
-            StringBuilder response = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    response.append(line);
-                }
-            }
-            return response.toString();
-        } catch (Exception e) {
-            throw new IllegalStateException("HTTP GET failed, url=" + url, e);
-        } finally {
-            if (connection != null) {
-                connection.disconnect();
-            }
+    /** GET 请求, 返回响应头 (用于 Cookie 提取) */
+    public Map<String, String> getWithHeaders(String url, Map<String, String> headers, String proxyAddress) {
+        var builder = RequestEntity.get(url);
+        if (headers != null) {
+            headers.forEach(builder::header);
         }
+        RestTemplate template = StringUtils.hasText(proxyAddress) ? proxiedRestTemplate(proxyAddress) : restTemplate;
+        ResponseEntity<String> response = template.exchange(builder.build(), String.class);
+        Map<String, String> result = new LinkedHashMap<>();
+        response.getHeaders().forEach((key, values) -> {
+            if (!values.isEmpty()) {
+                result.put(key, values.get(0));
+            }
+        });
+        return result;
     }
 
     private Proxy proxy(String proxyAddress) {

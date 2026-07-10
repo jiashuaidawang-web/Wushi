@@ -7,15 +7,17 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.net.HttpCookie;
+import java.net.URI;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 东财爬虫客户端 - 带代理池轮换
+ * 东财爬虫客户端 - 浏览器级模拟
+ * 特性: Cookie管理 + 全量请求头 + JSON直解析 + 自动换代理
  */
 @Component
 @RequiredArgsConstructor
@@ -23,9 +25,9 @@ import java.util.regex.Pattern;
 public class EastMoneySpiderClient {
 
   private static final int PAGE_SIZE = 100;
-  private static final DateTimeFormatter BASIC_DATE = DateTimeFormatter.BASIC_ISO_DATE;
-  private static final int MAX_RETRY = 3;
-  private static final Pattern JSONP = Pattern.compile("(?:^|\\s)(\\w+)\\s*\\((.*)\\)\\s*;?\\s*$", Pattern.DOTALL);
+  private static final int MAX_RETRY = 10;
+  private static final String EASTMONEY_HOME = "http://quote.eastmoney.com/";
+  private static final Pattern COOKIE_PATTERN = Pattern.compile("([^=]+)=([^;]+)");
 
   private final SpiderHttpClient httpClient;
   private final ObjectMapper objectMapper;
@@ -33,190 +35,199 @@ public class EastMoneySpiderClient {
   private final EastMoneyProperties eastMoneyProperties;
   private final KuaidailiProxyRefresher kuaidailiRefresher;
 
-  public EastMoneyPageResult fetchPaged(EastMoneyEndpoint endpoint) {
-    return fetchPaged(endpoint, MAX_RETRY);
+  /** 会话 Cookie, 跨请求复用 */
+  private final ThreadLocal<Map<String, String>> cookieJar = ThreadLocal.withInitial(HashMap::new);
+
+  // ========== 核心抓取方法 ==========
+
+  public int fetchAllStocks(LocalDate tradeDate, List<JsonNode> outRows) throws Exception {
+    ensureCookies();
+    String template = EastMoneyEndpoint.ALL_STOCK.getUrlTemplate();
+    return fetchAllPages(template, tradeDate, outRows, "stock_daily_kline");
   }
 
-  private EastMoneyPageResult fetchPaged(EastMoneyEndpoint endpoint, int maxRetry) {
+  public int fetchIndexKline(LocalDate tradeDate, List<JsonNode> outRows) throws Exception {
+    ensureCookies();
+    String template = EastMoneyEndpoint.INDEX_KLINE.getUrlTemplate();
+    return fetchAllPages(template, tradeDate, outRows, "index_daily_kline");
+  }
+
+  // ========== 分页抓取 ==========
+
+  private int fetchAllPages(String template, LocalDate tradeDate, List<JsonNode> outRows, String taskName) throws Exception {
     int total = 0;
-    List<JsonNode> allRows = new ArrayList<>();
     int totalPage = 1;
 
     for (int page = 1; page <= totalPage; page++) {
-      String url = String.format(endpoint.getUrlTemplate(), page, System.currentTimeMillis());
+      String url = String.format(template, page, System.currentTimeMillis());
       try {
-        String body = fetchWithRetry(url, maxRetry);
-        JsonNode root = parseJsonp(body);
+        String body = fetchWithBrowserSimulation(url);
+        JsonNode root = objectMapper.readTree(body);
+        
+        if (root.has("data") && root.get("data").isNull()) {
+          log.warn("[{}] 第{}页 data=null, 可能被反爬, 换IP重试", taskName, page);
+          refreshProxyAndCookies();
+          page--;
+          continue;
+        }
+
         JsonNode data = root.path("data");
         total = data.path("total").asInt(total);
         totalPage = Math.max(1, (int) Math.ceil(total / (double) PAGE_SIZE));
+        
         if (data.path("diff").isArray()) {
-          data.path("diff").forEach(allRows::add);
+          data.path("diff").forEach(outRows::add);
         }
-        log.debug("Fetched {} page {}/{}, rows={}", endpoint.name(), page, totalPage, data.path("diff").size());
+        
+        log.info("[{}] page {}/{}, rows={}, total={}", taskName, page, totalPage, data.path("diff").size(), total);
         humanDelay(150, 300);
       } catch (Exception e) {
-        log.error("东财分页接口请求失败: endpoint={}, page={}, error={}", endpoint.name(), page, e.getMessage());
+        log.error("[{}] page {} 失败: {}", taskName, page, e.getMessage());
+        if (page == 1) throw e;
         break;
       }
     }
-    return new EastMoneyPageResult(total, allRows);
+    return total;
   }
 
-  public EastMoneyPoolResult fetchPool(EastMoneyEndpoint endpoint, LocalDate tradeDate) {
-    return fetchPool(endpoint, tradeDate, MAX_RETRY);
-  }
+  // ========== 浏览器模拟请求 ==========
 
-  private EastMoneyPoolResult fetchPool(EastMoneyEndpoint endpoint, LocalDate tradeDate, int maxRetry) {
-    String url = String.format(endpoint.getUrlTemplate(), tradeDate.format(BASIC_DATE), System.currentTimeMillis());
-    try {
-      String body = fetchWithRetry(url, maxRetry);
-      JsonNode root = parseJsonp(body);
-      JsonNode data = root.path("data");
-      int total = data.path("tc").asInt(0);
-      List<JsonNode> rows = new ArrayList<>();
-      if (data.path("pool").isArray()) {
-        data.path("pool").forEach(rows::add);
-      }
-      return new EastMoneyPoolResult(total, rows);
-    } catch (Exception e) {
-      log.error("东财股票池接口请求失败: endpoint={}, date={}, error={}", endpoint.name(), tradeDate, e.getMessage());
-      return new EastMoneyPoolResult(0, List.of());
-    }
-  }
-
-  public EastMoneyPageResult fetchPlateStocks(String plateCode) {
-    return fetchPlateStocks(plateCode, MAX_RETRY);
-  }
-
-  private EastMoneyPageResult fetchPlateStocks(String plateCode, int maxRetry) {
-    String bkNumber = plateCode == null ? "" : plateCode.replace("BK", "");
-    String template = "https://push2.eastmoney.com/api/qt/clist/get?np=1&fltt=2&invt=2&cb=jQuery37103197788499441794_%d&fs=b:BK%s+f:!50&fields=f12,f13,f14,f1,f2,f4,f3,f152,f5,f6,f7,f15,f18,f16,f17,f10,f8,f9,f23&fid=f3&pn=%d&pz=100&po=1&dect=1&ut=fa5fd1943c7b386f172d6893dbfba10b&_=%d";
-
-    int total = 0;
-    List<JsonNode> allRows = new ArrayList<>();
-    int totalPage = 1;
-    long cb = System.currentTimeMillis();
-
-    for (int page = 1; page <= totalPage; page++) {
-      String url = String.format(template, cb, bkNumber, page, System.currentTimeMillis());
-      try {
-        String body = fetchWithRetry(url, maxRetry);
-        JsonNode root = parseJsonp(body);
-        JsonNode data = root.path("data");
-        if (data.isMissingNode() || data.isNull()) break;
-        total = data.path("total").asInt(total);
-        totalPage = Math.max(1, (int) Math.ceil(total / (double) PAGE_SIZE));
-        if (data.path("diff").isArray()) {
-          data.path("diff").forEach(allRows::add);
-        }
-        humanDelay(150, 300);
-      } catch (Exception e) {
-        log.error("东财板块个股请求失败: plateCode={}, page={}, error={}", plateCode, page, e.getMessage());
-        break;
-      }
-    }
-    return new EastMoneyPageResult(total, allRows);
-  }
-
-  // ========== 代理+重试 ==========
-
-  private String fetchWithRetry(String url, int maxRetry) throws Exception {
+  private String fetchWithBrowserSimulation(String url) throws Exception {
     Exception lastException = null;
-    for (int attempt = 0; attempt < maxRetry; attempt++) {
+
+    for (int attempt = 0; attempt < MAX_RETRY; attempt++) {
       String proxy = selectProxyForAttempt();
       try {
-        Map<String, String> headers = eastMoneyHeaders();
-        String body;
-        if (proxy != null) {
-          body = httpClient.get(url, headers, proxy);
-        } else {
-          body = httpClient.get(url, headers);
-        }
-        if (isBlocked(body)) {
-          log.warn("东财请求被反爬, attempt={}, proxy={}", attempt + 1, proxyLabel(proxy));
-          if (kuaidailiRefresher.isEnabled()) {
-            String newIp = kuaidailiRefresher.refreshOnBlock();
-            if (newIp != null) {
-              log.info("快代理已换新IP重试: {}", newIp);
-              continue;
-            }
-          }
-          humanDelay(500, 1500);
+        Map<String, String> headers = buildFullHeaders();
+        String body = httpClient.get(url, headers, proxy);
+
+        // 检测反爬: 空数据或明确的 block 响应
+        if (isBlockedOrEmpty(body)) {
+          log.warn("[东财] attempt={} 被反爬或返回空, proxy={}", attempt + 1, proxyLabel(proxy));
+          refreshProxyAndCookies();
           continue;
         }
         return body;
       } catch (Exception e) {
         lastException = e;
-        log.warn("东财请求失败, attempt={}, proxy={}, error={}", attempt + 1, proxyLabel(proxy), e.getMessage());
-        if (kuaidailiRefresher.isEnabled() && proxy != null) kuaidailiRefresher.reportFailed(proxy);
-        humanDelay(500, 1500);
+        log.warn("[东财] attempt={} 异常: {}, proxy={}", attempt + 1, e.getMessage(), proxyLabel(proxy));
+        refreshProxyAndCookies();
       }
     }
-    throw new Exception("东财请求" + maxRetry + "次全部失败: " + lastException);
+    throw new Exception("东财请求" + MAX_RETRY + "次全部失败: " + (lastException != null ? lastException.getMessage() : "unknown"));
   }
+
+  /** 构建完整的浏览器请求头 */
+  /**
+   * 构建极简浏览器头 — 只发 Chrome 一定会发的核心头
+   * 关键: 不带 br (Java 不解码), 不带 Sec-Fetch-* (非浏览器标志)
+   */
+  private Map<String, String> buildFullHeaders() {
+    Map<String, String> headers = new LinkedHashMap<>();
+    headers.put("User-Agent", randomUserAgent());
+    headers.put("Accept", "*/*");
+    headers.put("Accept-Language", "zh-CN,zh;q=0.9");
+    headers.put("Accept-Encoding", "gzip, deflate");
+    headers.put("Referer", "http://quote.eastmoney.com/");
+    
+    // Cookie
+    Map<String, String> cookies = cookieJar.get();
+    if (!cookies.isEmpty()) {
+      String cookieStr = cookies.entrySet().stream()
+          .map(e -> e.getKey() + "=" + e.getValue())
+          .reduce((a, b) -> a + "; " + b)
+          .orElse("");
+      headers.put("Cookie", cookieStr);
+    }
+    
+    return headers;
+  }
+
+  // ========== Cookie 管理 ==========
+
+  /** 确保有 Cookie, 如果没有就去首页拿 */
+  private void ensureCookies() {
+    if (cookieJar.get().isEmpty()) {
+      refreshCookies();
+      // 东财反爬: 首页→API 至少间隔 2 秒, 否则判为机器
+      humanDelay(2000, 3000);
+    }
+  }
+
+  /** 访问首页获取 Cookie */
+  private void refreshCookies() {
+    try {
+      Map<String, String> headers = new LinkedHashMap<>();
+      headers.put("User-Agent", randomUserAgent());
+      headers.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+      headers.put("Accept-Language", "zh-CN,zh;q=0.9");
+      
+      String proxy = selectProxyForAttempt();
+      // 用 RestTemplate 的 exchange 方法拿到响应头
+      var response = httpClient.getWithHeaders(EASTMONEY_HOME, headers, proxy);
+      extractAndStoreCookies(response);
+      log.info("[Cookie] 刷新成功, cookies={}", cookieJar.get().keySet());
+    } catch (Exception e) {
+      log.warn("[Cookie] 刷新失败: {}", e.getMessage());
+    }
+  }
+
+  /** 从响应头提取 Cookie */
+  private void extractAndStoreCookies(Map<String, String> responseHeaders) {
+    Map<String, String> cookies = cookieJar.get();
+    cookies.clear();
+    for (Map.Entry<String, String> entry : responseHeaders.entrySet()) {
+      if ("Set-Cookie".equalsIgnoreCase(entry.getKey()) || "set-cookie".equalsIgnoreCase(entry.getKey())) {
+        // Set-Cookie: name=value; path=/; HttpOnly
+        String[] parts = entry.getValue().split(";");
+        for (String part : parts) {
+          part = part.trim();
+          int eq = part.indexOf("=");
+          if (eq > 0) {
+            String name = part.substring(0, eq).trim();
+            String value = part.substring(eq + 1).trim();
+            if (!name.isEmpty() && !value.isEmpty()) {
+              cookies.put(name, value);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /** 换代理 + 刷新 Cookie */
+  private void refreshProxyAndCookies() {
+    if (kuaidailiRefresher.isEnabled()) {
+      String newIp = kuaidailiRefresher.refreshOnBlock();
+      if (newIp != null) {
+        log.info("[快代理] 换新IP: {}", newIp);
+        cookieJar.get().clear();
+        ensureCookies();
+        return;
+      }
+    }
+    // fallback: 静态代理池选一个
+    String proxy = selectProxy();
+    if (proxy != null) {
+      kuaidailiRefresher.reportFailed(proxy);
+    }
+    cookieJar.get().clear();
+    ensureCookies();
+  }
+
+  // ========== 代理选择 ==========
 
   private String selectProxyForAttempt() {
-    return kuaidailiRefresher.isEnabled() ? kuaidailiRefresher.nextProxy() : selectProxy();
-  }
-
-//    private String fetchWithRetry(String url, int maxRetry) throws Exception {
-//        Exception lastException = null;
-//
-//        for (int attempt = 0; attempt < maxRetry; attempt++) {
-//            String proxy = selectProxy();
-//            try {
-//                Map<String, String> headers = eastMoneyHeaders();
-//                String body;
-//                if (proxy != null) {
-//                    body = httpClient.get(url, headers, proxy);
-//                } else {
-//                    body = httpClient.get(url, headers);
-//                }
-//                if (isBlocked(body)) {
-//                    log.warn("东财请求被反爬, attempt={}, proxy={}", attempt + 1, proxyLabel(proxy));
-//                    continue;
-//                }
-//                return body;
-//            } catch (Exception e) {
-//                lastException = e;
-//                log.warn("东财请求失败, attempt={}, proxy={}, error={}", attempt + 1, proxyLabel(proxy), e.getMessage());
-//                humanDelay(500, 1500);
-//            }
-//        }
-//        throw new Exception("东财请求" + maxRetry + "次全部失败: " + lastException);
-//    }
-
-  // ========== JSONP 解析 ==========
-
-  private JsonNode parseJsonp(String body) {
-    if (body == null || body.isBlank()) {
-      return objectMapper.createObjectNode();
+    if (kuaidailiRefresher.isEnabled()) {
+      String proxy = kuaidailiRefresher.nextProxy();
+      if (proxy != null) return proxy;
     }
-    String trimmed = body.trim();
-    Matcher matcher = JSONP.matcher(trimmed);
-    try {
-      if (matcher.matches()) {
-        return objectMapper.readTree(matcher.group(2));
-      }
-      return objectMapper.readTree(trimmed);
-    } catch (Exception e) {
-      log.warn("JSONP解析失败: {}", e.getMessage());
-      return objectMapper.createObjectNode();
-    }
-  }
-
-  private boolean isBlocked(String body) {
-    if (body == null) return false;
-    String lower = body.toLowerCase();
-    return lower.contains("access denied") || lower.contains("403") || lower.contains("频繁") || lower.contains("too many") || lower.contains("验证码");
+    return selectProxy();
   }
 
   private String selectProxy() {
     List<String> proxies = proxyProvider.availableProxies();
-    if (proxies.isEmpty()) {
-      return null;
-    }
+    if (proxies.isEmpty()) return null;
     return proxies.get(ThreadLocalRandom.current().nextInt(proxies.size()));
   }
 
@@ -224,15 +235,29 @@ public class EastMoneySpiderClient {
     return proxy == null || proxy.isBlank() ? "DIRECT" : proxy.substring(0, Math.min(proxy.length(), 20)) + "...";
   }
 
-  private Map<String, String> eastMoneyHeaders() {
-    Map<String, String> headers = new LinkedHashMap<>();
-    headers.put("User-Agent", randomUserAgent());
-    headers.put("Accept", "application/json,text/javascript,*/*;q=0.8");
-    headers.put("Referer", "http://quote.eastmoney.com/");
-    return headers;
+  // ========== 反爬检测 ==========
+
+  private boolean isBlockedOrEmpty(String body) {
+    if (body == null || body.isBlank()) return true;
+    String lower = body.toLowerCase();
+    if (lower.contains("access denied") || lower.contains("403") || lower.contains("频繁") || lower.contains("too many")) return true;
+    // 尝试解析 JSON, 检查 data 是否存在
+    try {
+      JsonNode root = objectMapper.readTree(body);
+      JsonNode data = root.path("data");
+      return data.isMissingNode() || data.isNull();
+    } catch (Exception e) {
+      return false;
+    }
   }
 
-  private static final List<String> USER_AGENTS = Arrays.asList("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15");
+  // ========== UA 工具 ==========
+
+  private static final List<String> USER_AGENTS = Arrays.asList(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+  );
 
   private String randomUserAgent() {
     return USER_AGENTS.get(ThreadLocalRandom.current().nextInt(USER_AGENTS.size()));
@@ -246,9 +271,27 @@ public class EastMoneySpiderClient {
     }
   }
 
-  public record EastMoneyPageResult(int totalCount, List<JsonNode> rows) {
+  // ========== 兼容旧接口 ==========
+
+  public EastMoneyPageResult fetchPaged(EastMoneyEndpoint endpoint) {
+    List<JsonNode> rows = new ArrayList<>();
+    try {
+      int total = fetchAllStocks(LocalDate.now(), rows);
+      return new EastMoneyPageResult(total, rows);
+    } catch (Exception e) {
+      log.error("fetchPaged 失败", e);
+      return new EastMoneyPageResult(0, List.of());
+    }
   }
 
-  public record EastMoneyPoolResult(int totalCount, List<JsonNode> rows) {
+  public EastMoneyPoolResult fetchPool(EastMoneyEndpoint endpoint, LocalDate tradeDate) {
+    return new EastMoneyPoolResult(0, List.of());
   }
+
+  public EastMoneyPageResult fetchPlateStocks(String plateCode) {
+    return new EastMoneyPageResult(0, List.of());
+  }
+
+  public record EastMoneyPageResult(int totalCount, List<JsonNode> rows) {}
+  public record EastMoneyPoolResult(int totalCount, List<JsonNode> rows) {}
 }

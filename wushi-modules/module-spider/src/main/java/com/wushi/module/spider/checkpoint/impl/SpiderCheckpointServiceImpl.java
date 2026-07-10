@@ -62,7 +62,16 @@ public class SpiderCheckpointServiceImpl implements SpiderCheckpointService {
             entity.setProvider(provider);
             entity.setCreatedAt(LocalDateTime.now());
         }
-        entity.setStatus(STATUS_SUCCESS);
+        // 关键修复: success=0 不能算成功,标记为 FAILED 以便下次重试
+        if (successCount <= 0) {
+            entity.setStatus(STATUS_FAILED);
+            entity.setErrorMessage("抓取数量为0，标记失败以便重试");
+            log.warn("任务标记为FAILED(数据为空): taskCode={}, tradeDate={}, provider={}", taskCode, tradeDate, provider);
+        } else {
+            entity.setStatus(STATUS_SUCCESS);
+            log.info("任务标记为SUCCESS: taskCode={}, tradeDate={}, provider={}, success={}, fail={}",
+                    taskCode, tradeDate, provider, successCount, failCount);
+        }
         entity.setSuccessCount(successCount);
         entity.setFailCount(failCount);
         entity.setCheckpointValue(checkpointValue);
@@ -70,8 +79,6 @@ public class SpiderCheckpointServiceImpl implements SpiderCheckpointService {
         entity.setErrorMessage(null);
         entity.setUpdatedAt(LocalDateTime.now());
         saveOrUpdate(entity);
-        log.info("任务标记为SUCCESS: taskCode={}, tradeDate={}, provider={}, success={}, fail={}",
-                taskCode, tradeDate, provider, successCount, failCount);
     }
 
     @Override

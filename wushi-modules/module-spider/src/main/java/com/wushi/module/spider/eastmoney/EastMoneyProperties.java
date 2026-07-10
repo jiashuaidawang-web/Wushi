@@ -9,7 +9,7 @@ import java.util.List;
 
 @Data
 @Component
-@ConfigurationProperties(prefix = "spider.eastmoney")
+@ConfigurationProperties(prefix = "wushi.spider.eastmoney")
 public class EastMoneyProperties {
 
   /**
