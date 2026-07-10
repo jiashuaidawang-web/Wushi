@@ -4,6 +4,7 @@ import com.wushi.module.market.domain.row.StockPlateDailyKlineRow;
 import com.wushi.module.market.domain.row.StockPlateDimensionRow;
 import com.wushi.module.market.domain.row.StockPlateRelationSnapshotRow;
 import com.wushi.module.spider.common.SpiderHttpClient;
+import com.wushi.module.spider.eastmoney.KuaidailiProxyRefresher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.openqa.selenium.*;
@@ -34,7 +35,7 @@ import java.util.regex.Pattern;
  * 核心策略:
  * 1. 板块维度: 从同花顺板块页面抓取板块列表和行情
  * 2. 个股关系: 从板块详情页抓取板块下个股
- * 3. 反爬应对: 代理池轮换 + 浏览器指纹模拟 + 滑块检测
+ * 3. 反爬应对: 代理池轮换 + 浏览器指纹模拟 + 滑块检测 + 快代理IP自动刷新
  */
 @Service
 @RequiredArgsConstructor
@@ -43,10 +44,12 @@ public class ThsSpiderServiceImpl {
 
     private static final String THS_HOME = "http://q.10jqka.com.cn/";
     private static final By PLATE_LINKS_SELECTOR = By.cssSelector("a[href*='/code/']");
+    private static final int MAX_BLOCK_RETRIES = 3;
 
     private final SpiderHttpClient httpClient;
     private final ThsBrowserProperties browserProperties;
     private final ThsProxyProvider proxyProvider;
+    private final KuaidailiProxyRefresher kuaidailiRefresher;
     private final ThreadLocal<WebDriver> currentDriver = new ThreadLocal<>();
     private final AtomicBoolean running = new AtomicBoolean(false);
 
@@ -91,7 +94,7 @@ public class ThsSpiderServiceImpl {
         for (String[] cat : categories) {
             try {
                 String url = THS_HOME + cat[0] + "/";
-                List<StockPlateDimensionRow> plates = fetchPlatesFromPage(url, cat[1], tradeDate);
+                List<StockPlateDimensionRow> plates = fetchPlatesFromPageWithRetry(url, cat[1], tradeDate);
                 allPlates.addAll(plates);
                 log.info("同花顺{}板块抓取完成: count={}", cat[2], plates.size());
             } catch (Exception e) {
@@ -103,53 +106,64 @@ public class ThsSpiderServiceImpl {
     }
 
     /**
-     * 从板块列表页抓取板块
+     * 从板块列表页抓取板块 (带IP被封自动换代理重试)
      */
-    public List<StockPlateDimensionRow> fetchPlatesFromPage(String url, String plateType, LocalDate tradeDate) {
-        WebDriver driver = null;
-        try {
-            driver = createDriver();
-            currentDriver.set(driver);
-            driver.get(url);
-            sleep(2000);
+    private List<StockPlateDimensionRow> fetchPlatesFromPageWithRetry(String url, String plateType, LocalDate tradeDate) {
+        for (int attempt = 0; attempt < MAX_BLOCK_RETRIES; attempt++) {
+            WebDriver driver = null;
+            try {
+                driver = createDriver();
+                currentDriver.set(driver);
+                driver.get(url);
+                sleep(2000);
 
-            // 检测滑块/验证码
-            if (detectCaptcha(driver)) {
-                log.warn("同花顺页面检测到验证码/滑块, url={}", url);
-                handleCaptcha(driver);
-            }
-
-            List<StockPlateDimensionRow> plates = new ArrayList<>();
-            // 板块代码从链接中提取 (/code/XXXXXX)
-            List<WebElement> links = driver.findElements(By.cssSelector("a[href*='/code/']"));
-            for (WebElement link : links) {
-                try {
-                    String href = link.getAttribute("href");
-                    String text = link.getText();
-                    if (href == null || text == null) continue;
-
-                    Matcher matcher = Pattern.compile("/code/(\\d{6})").matcher(href);
-                    if (matcher.find()) {
-                        String plateCode = matcher.group(1);
-                        plates.add(new StockPlateDimensionRow(
-                                plateCode,
-                                text.trim(),
-                                plateType,
-                                "",
-                                "ACTIVE",
-                                "0" // source: 0 = ths
-                        ));
+                if (detectCaptcha(driver)) {
+                    log.warn("同花顺页面检测到验证码/滑块, attempt={}, url={}", attempt + 1, url);
+                    if (kuaidailiRefresher.isEnabled() && attempt < MAX_BLOCK_RETRIES - 1) {
+                        String newIp = kuaidailiRefresher.refreshOnBlock();
+                        if (newIp != null) {
+                            log.info("快代理已换新IP重试: {}", newIp);
+                            cleanupDriver();
+                            continue;
+                        }
                     }
-                } catch (StaleElementReferenceException ignored) {
+                    handleCaptcha(driver);
                 }
+
+                List<StockPlateDimensionRow> plates = new ArrayList<>();
+                List<WebElement> links = driver.findElements(By.cssSelector("a[href*='/code/']"));
+                for (WebElement link : links) {
+                    try {
+                        String href = link.getAttribute("href");
+                        String text = link.getText();
+                        if (href == null || text == null) continue;
+
+                        Matcher matcher = Pattern.compile("/code/(\\d{6})").matcher(href);
+                        if (matcher.find()) {
+                            String plateCode = matcher.group(1);
+                            plates.add(new StockPlateDimensionRow(
+                                    plateCode,
+                                    text.trim(),
+                                    plateType,
+                                    "",
+                                    "ACTIVE",
+                                    "0"
+                            ));
+                        }
+                    } catch (StaleElementReferenceException ignored) {
+                    }
+                }
+                return plates;
+            } catch (Exception e) {
+                log.error("同花顺板块页面抓取失败: url={}, attempt={}, error={}", url, attempt + 1, e.getMessage());
+                if (kuaidailiRefresher.isEnabled() && attempt < MAX_BLOCK_RETRIES - 1) {
+                    kuaidailiRefresher.refreshOnBlock();
+                }
+            } finally {
+                cleanupDriver();
             }
-            return plates;
-        } catch (Exception e) {
-            log.error("同花顺板块页面抓取失败: url={}, error={}", url, e.getMessage());
-            return List.of();
-        } finally {
-            cleanupDriver();
         }
+        return List.of();
     }
 
     /**
@@ -168,7 +182,19 @@ public class ThsSpiderServiceImpl {
             sleep(2000);
 
             if (detectCaptcha(driver)) {
-                handleCaptcha(driver);
+                if (kuaidailiRefresher.isEnabled()) {
+                    String newIp = kuaidailiRefresher.refreshOnBlock();
+                    if (newIp != null) {
+                        log.info("快代理换新IP后重试关系页: {}", newIp);
+                        cleanupDriver();
+                        driver = createDriver();
+                        currentDriver.set(driver);
+                        driver.get(THS_HOME + "gn/");
+                        sleep(2000);
+                    }
+                } else {
+                    handleCaptcha(driver);
+                }
             }
 
             // 获取所有概念板块链接
@@ -198,29 +224,34 @@ public class ThsSpiderServiceImpl {
                     log.warn("抓取板块个股失败: {}", e.getMessage());
                 }
             }
+
+            log.info("同花顺个股关系抓取完成: count={}", allRelations.size());
+            return allRelations;
         } catch (Exception e) {
-            log.error("同花顺板块个股关系抓取失败: {}", e.getMessage());
+            log.error("同花顺个股关系抓取失败: {}", e.getMessage());
+            return allRelations;
         } finally {
             cleanupDriver();
         }
-        return allRelations;
     }
 
     /**
-     * 抓取单个板块下的个股
+     * 抓取板块下的个股(复用driver)
      */
-    public List<StockPlateRelationSnapshotRow> fetchPlateStocks(WebDriver driver, String plateCode,
-                                                                String plateName, String plateType,
-                                                                LocalDate tradeDate) {
+    private List<StockPlateRelationSnapshotRow> fetchPlateStocks(WebDriver driver, String plateCode, String plateName,
+                                                                 String plateType, LocalDate tradeDate) {
         try {
-            String url = THS_HOME + "gn/code/" + plateCode + "/";
-            driver.get(url);
+            driver.get(THS_HOME + "code/" + plateCode + "/");
             sleep(1500);
 
+            if (detectCaptcha(driver)) {
+                log.warn("板块个股页检测到验证码, plateCode={}", plateCode);
+                handleCaptcha(driver);
+            }
+
             List<StockPlateRelationSnapshotRow> relations = new ArrayList<>();
-            // 从板块详情页提取个股代码
-            List<WebElement> stockLinks = driver.findElements(By.cssSelector("a[href*='/page/'], a[href*='/stock/']"));
-            for (WebElement link : stockLinks) {
+            List<WebElement> links = driver.findElements(By.cssSelector("table.m_table tbody tr"));
+            for (WebElement link : links) {
                 try {
                     String text = link.getText();
                     if (text == null) continue;
@@ -238,7 +269,7 @@ public class ThsSpiderServiceImpl {
                                 "HISTORICAL_CRAWLED",
                                 new BigDecimal("0.7000"),
                                 1,
-                                "0" // source: ths
+                                "0"
                         ));
                     }
                 } catch (StaleElementReferenceException ignored) {
@@ -265,7 +296,7 @@ public class ThsSpiderServiceImpl {
         options.setExperimentalOption("excludeSwitches", List.of("enable-automation"));
         options.setExperimentalOption("useAutomationExtension", false);
 
-        // 代理
+        // 代理 - 优先快代理
         String proxy = selectProxy();
         if (proxy != null && !proxy.isBlank()) {
             options.addArguments("--proxy-server=http://" + proxy);
@@ -315,12 +346,16 @@ public class ThsSpiderServiceImpl {
         sleep(2000);
     }
 
+    /**
+     * 选择代理 - 优先快代理
+     */
     private String selectProxy() {
+        if (kuaidailiRefresher.isEnabled()) {
+            String proxy = kuaidailiRefresher.nextProxy();
+            if (proxy != null) return proxy;
+        }
         List<String> proxies = proxyProvider.availableProxies();
         if (proxies.isEmpty()) {
-            if (browserProperties.isDirectFirst()) {
-                return null; // 先尝试直连
-            }
             return null;
         }
         // 随机选一个

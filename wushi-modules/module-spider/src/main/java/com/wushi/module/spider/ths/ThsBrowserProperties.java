@@ -110,4 +110,41 @@ public class ThsBrowserProperties {
     ));
 
     private int pageLoadTimeoutSeconds = 60;
+
+    // ========== 快代理配置 ==========
+
+    /**
+     * 是否启用快代理IP自动刷新
+     */
+    private boolean kuaidailiEnabled = false;
+
+    /**
+     * 快代理API地址
+     */
+    private String kuaidailiApiUrl;
+
+    /**
+     * 每次请求提取的IP数量
+     */
+    private int kuaidailiNum = 1;
+
+    /**
+     * 响应格式: text 或 json
+     */
+    private String kuaidailiFormat = "text";
+
+    /**
+     * JSON响应中IP列表的路径(仅json格式)
+     */
+    private String kuaidailiJsonPath = "data.proxy_list";
+
+    /**
+     * API调用超时(毫秒)
+     */
+    private int kuaidailiTimeoutMs = 5000;
+
+    /**
+     * 每个IP最大使用次数
+     */
+    private int kuaidailiMaxUsesPerIp = 5;
 }

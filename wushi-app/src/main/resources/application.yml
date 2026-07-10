@@ -30,14 +30,26 @@ wushi:
   spider:
     ths:
       browser:
-        # 同花顺代理池 (格式: ip:port 或 protocol://ip:port)
         proxy-pool:
           - 58.19.54.157:16430
         max-proxy-retries: 3
         direct-first: true
+        kuaidaili:
+          enabled: true
+          api-url: "https://dps.kdlapi.com/api/getdps/?secret_id=omb7vq7v5keahv63y6rx&signature=b5nc6bmmjzcmlfvs9h36enz8k1twt8m0&num=1&format=text&sep=1"
+          num: 1
+          format: text
+          timeout-ms: 5000
+          max-uses-per-ip: 5
     eastmoney:
-      # 东财代理池 (独立配置, 格式同上)
       proxy-pool:
         - 58.19.54.157:16430
       max-proxy-retries: 3
       direct-first: true
+      kuaidaili:
+        enabled: true
+        api-url: "https://dps.kdlapi.com/api/getdps/?secret_id=omb7vq7v5keahv63y6rx&signature=b5nc6bmmjzcmlfvs9h36enz8k1twt8m0&num=1&format=text&sep=1"
+        num: 1
+        format: text
+        timeout-ms: 5000
+        max-uses-per-ip: 5

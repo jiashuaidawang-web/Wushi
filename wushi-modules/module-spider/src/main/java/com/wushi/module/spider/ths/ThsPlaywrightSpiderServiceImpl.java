@@ -5,6 +5,7 @@ import com.microsoft.playwright.options.LoadState;
 import com.wushi.module.market.domain.row.StockPlateDimensionRow;
 import com.wushi.module.market.domain.row.StockPlateRelationSnapshotRow;
 import com.wushi.module.spider.common.SpiderHttpClient;
+import com.wushi.module.spider.eastmoney.KuaidailiProxyRefresher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -20,7 +21,7 @@ import java.util.regex.Pattern;
 
 /**
  * 同花顺爬虫 - Playwright 实现
- * 特性: Playwright + stealth JS + 真实用户行为模拟 + 代理池
+ * 特性: Playwright + stealth JS + 真实用户行为模拟 + 代理池 + 快代理IP自动刷新
  */
 @Service
 @RequiredArgsConstructor
@@ -30,10 +31,12 @@ public class ThsPlaywrightSpiderServiceImpl {
     private static final String THS_HOME = "http://q.10jqka.com.cn/";
     private static final Pattern PLATE_CODE_PATTERN = Pattern.compile("/code/(\\d{6})");
     private static final Pattern STOCK_CODE_PATTERN = Pattern.compile("\\b(\\d{6})\\b");
+    private static final int MAX_BLOCK_RETRIES = 3;
 
     private final SpiderHttpClient httpClient;
     private final ThsBrowserProperties browserProperties;
     private final ThsProxyProvider proxyProvider;
+    private final KuaidailiProxyRefresher kuaidailiRefresher;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     public Map<String, Object> syncDaily(LocalDate tradeDate) {
@@ -65,7 +68,7 @@ public class ThsPlaywrightSpiderServiceImpl {
         for (String[] cat : categories) {
             try {
                 String url = THS_HOME + cat[0] + "/";
-                List<StockPlateDimensionRow> plates = fetchPlatesFromPage(url, cat[1], tradeDate);
+                List<StockPlateDimensionRow> plates = fetchPlatesFromPageWithRetry(url, cat[1], tradeDate);
                 allPlates.addAll(plates);
                 log.info("同花顺Playwright {}板块抓取完成: count={}", cat[0], plates.size());
             } catch (Exception e) {
@@ -76,7 +79,66 @@ public class ThsPlaywrightSpiderServiceImpl {
         return allPlates;
     }
 
-    public List<StockPlateDimensionRow> fetchPlatesFromPage(String url, String plateType, LocalDate tradeDate) {
+    /**
+     * 从板块列表页抓取板块 (带IP被封自动换代理重试)
+     */
+    private List<StockPlateDimensionRow> fetchPlatesFromPageWithRetry(String url, String plateType, LocalDate tradeDate) {
+        for (int attempt = 0; attempt < MAX_BLOCK_RETRIES; attempt++) {
+            Playwright playwright = null;
+            Browser browser = null;
+            try {
+                playwright = Playwright.create();
+                browser = createBrowser(playwright);
+                BrowserContext context = createContext(browser);
+                Page page = context.newPage();
+
+                page.navigate(url, new Page.NavigateOptions().setTimeout(60000));
+                page.waitForLoadState(LoadState.NETWORKIDLE);
+                humanScroll(page);
+                humanDelay(500, 1500);
+
+                if (detectCaptcha(page)) {
+                    log.warn("同花顺Playwright检测到验证码, attempt={}, url={}", attempt + 1, url);
+                    if (kuaidailiRefresher.isEnabled() && attempt < MAX_BLOCK_RETRIES - 1) {
+                        String newIp = kuaidailiRefresher.refreshOnBlock();
+                        if (newIp != null) {
+                            log.info("快代理已换新IP重试: {}", newIp);
+                            closeQuietly(context);
+                            closeQuietly(browser);
+                            closeQuietly(playwright);
+                            continue;
+                        }
+                    }
+                    handleCaptcha(page);
+                }
+
+                List<StockPlateDimensionRow> plates = new ArrayList<>();
+                Locator links = page.locator("a[href*='/code/']");
+                int count = links.count();
+                for (int i = 0; i < count; i++) {
+                    try {
+                        String href = links.nth(i).getAttribute("href");
+                        String text = links.nth(i).textContent();
+                        if (href == null || text == null) continue;
+                        Matcher matcher = PLATE_CODE_PATTERN.matcher(href);
+                        if (matcher.find()) {
+                            plates.add(new StockPlateDimensionRow(
+                                    matcher.group(1), text.trim(), plateType, null, "ACTIVE", "ths"));
+                        }
+                    } catch (Exception e) {
+                        log.warn("提取板块链接失败: {}", e.getMessage());
+                    }
+                }
+                return plates;
+            } finally {
+                closeQuietly(browser);
+                closeQuietly(playwright);
+            }
+        }
+        return List.of();
+    }
+
+    public List<StockPlateRelationSnapshotRow> fetchAllPlateRelations(LocalDate tradeDate) {
         Playwright playwright = null;
         Browser browser = null;
         try {
@@ -85,65 +147,63 @@ public class ThsPlaywrightSpiderServiceImpl {
             BrowserContext context = createContext(browser);
             Page page = context.newPage();
 
+            List<StockPlateRelationSnapshotRow> allRelations = new ArrayList<>();
+            // 简化示例: 遍历概念板块
+            String url = THS_HOME + "gn/";
             page.navigate(url, new Page.NavigateOptions().setTimeout(60000));
             page.waitForLoadState(LoadState.NETWORKIDLE);
             humanScroll(page);
-            humanDelay(500, 1500);
 
             if (detectCaptcha(page)) {
-                log.warn("同花顺Playwright检测到验证码, url={}", url);
-                handleCaptcha(page);
-            }
-
-            List<StockPlateDimensionRow> plates = new ArrayList<>();
-            Locator links = page.locator("a[href*='/code/']");
-            int count = links.count();
-            for (int i = 0; i < count; i++) {
-                try {
-                    String href = links.nth(i).getAttribute("href");
-                    String text = links.nth(i).textContent();
-                    if (href == null || text == null) continue;
-                    Matcher matcher = PLATE_CODE_PATTERN.matcher(href);
-                    if (matcher.find()) {
-                        plates.add(new StockPlateDimensionRow(
-                                matcher.group(1), text.trim(), plateType, null, "ACTIVE", "ths"));
+                if (kuaidailiRefresher.isEnabled()) {
+                    String newIp = kuaidailiRefresher.refreshOnBlock();
+                    if (newIp != null) {
+                        log.info("快代理换新IP后重试关系页: {}", newIp);
+                        closeQuietly(context);
+                        browser.close();
+                        browser = createBrowser(playwright);
+                        context = createContext(browser);
+                        page = context.newPage();
+                        page.navigate(url, new Page.NavigateOptions().setTimeout(60000));
+                        page.waitForLoadState(LoadState.NETWORKIDLE);
                     }
-                } catch (Exception e) {
-                    log.warn("提取板块链接失败: {}", e.getMessage());
+                } else {
+                    handleCaptcha(page);
                 }
             }
-            return plates;
+
+            Locator plateLinks = page.locator("a[href*='/code/']");
+            int plateCount = plateLinks.count();
+            Set<String> visitedPlates = new HashSet<>();
+
+            for (int i = 0; i < plateCount; i++) {
+                try {
+                    String href = plateLinks.nth(i).getAttribute("href");
+                    if (href == null) continue;
+                    Matcher matcher = PLATE_CODE_PATTERN.matcher(href);
+                    if (!matcher.find()) continue;
+                    String plateCode = matcher.group(1);
+                    if (visitedPlates.contains(plateCode)) continue;
+                    visitedPlates.add(plateCode);
+
+                    List<StockPlateRelationSnapshotRow> relations =
+                            fetchPlateStocks(context, plateCode, tradeDate);
+                    allRelations.addAll(relations);
+                    humanDelay(800, 1500);
+                } catch (Exception e) {
+                    log.warn("抓取板块个股失败: {}", e.getMessage());
+                }
+            }
+            return allRelations;
         } finally {
             closeQuietly(browser);
             closeQuietly(playwright);
         }
     }
 
-    public List<StockPlateRelationSnapshotRow> fetchAllPlateRelations(LocalDate tradeDate) {
-        List<StockPlateRelationSnapshotRow> allRelations = new ArrayList<>();
-        List<StockPlateDimensionRow> plates = fetchAllPlates(tradeDate);
-        for (StockPlateDimensionRow plate : plates) {
-            try {
-                List<StockPlateRelationSnapshotRow> relations = fetchPlateStocks(plate.plateCode(), tradeDate);
-                allRelations.addAll(relations);
-                log.debug("同花顺Playwright板块个股抓取: plateCode={}, count={}", plate.plateCode(), relations.size());
-            } catch (Exception e) {
-                log.warn("同花顺Playwright板块个股抓取失败: plateCode={}, error={}", plate.plateCode(), e.getMessage());
-            }
-            humanDelay(800, 1500);
-        }
-        return allRelations;
-    }
-
-    public List<StockPlateRelationSnapshotRow> fetchPlateStocks(String plateCode, LocalDate tradeDate) {
-        Playwright playwright = null;
-        Browser browser = null;
+    private List<StockPlateRelationSnapshotRow> fetchPlateStocks(BrowserContext context, String plateCode, LocalDate tradeDate) {
+        Page page = context.newPage();
         try {
-            playwright = Playwright.create();
-            browser = createBrowser(playwright);
-            BrowserContext context = createContext(browser);
-            Page page = context.newPage();
-
             String url = THS_HOME + "code/" + plateCode + "/";
             page.navigate(url, new Page.NavigateOptions().setTimeout(60000));
             page.waitForLoadState(LoadState.NETWORKIDLE);
@@ -172,9 +232,11 @@ public class ThsPlaywrightSpiderServiceImpl {
                 }
             }
             return relations;
+        } catch (Exception e) {
+            log.warn("抓取板块个股失败: plateCode={}, error={}", plateCode, e.getMessage());
+            return List.of();
         } finally {
-            closeQuietly(browser);
-            closeQuietly(playwright);
+            page.close();
         }
     }
 
@@ -237,7 +299,14 @@ public class ThsPlaywrightSpiderServiceImpl {
         humanDelay(2000, 3000);
     }
 
+    /**
+     * 选择代理 - 优先快代理
+     */
     private String selectProxy() {
+        if (kuaidailiRefresher.isEnabled()) {
+            String proxy = kuaidailiRefresher.nextProxy();
+            if (proxy != null) return proxy;
+        }
         List<String> proxies = proxyProvider.availableProxies();
         if (proxies.isEmpty()) return null;
         return proxies.get(ThreadLocalRandom.current().nextInt(proxies.size()));
