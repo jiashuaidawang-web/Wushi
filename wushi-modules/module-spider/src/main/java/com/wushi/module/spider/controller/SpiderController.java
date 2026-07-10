@@ -1,6 +1,7 @@
 package com.wushi.module.spider.controller;
 
 import com.wushi.module.spider.job.SpiderJob;
+import com.wushi.module.market.service.MarketSnapshotAggregationService;
 import com.wushi.module.spider.ths.ThsProxyProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,6 +22,7 @@ public class SpiderController {
 
     private final SpiderJob spiderJob;
     private final ThsProxyProvider thsProxyProvider;
+    private final MarketSnapshotAggregationService aggregationService;
 
     /**
      * 东财全量日跑批
@@ -112,6 +114,23 @@ public class SpiderController {
     @GetMapping("/ths/proxy/warmup")
     public ApiResponse<Map<String, Object>> warmupThsProxyPool() {
         return ApiResponse.success(thsProxyProvider.warmup());
+    }
+
+    /**
+     * 聚合市场快照（plate_daily + market_breadth）
+     * GET /api/spider/aggregate?tradeDate=2026-07-08
+     */
+    @GetMapping("/aggregate")
+    public ApiResponse<Map<String, Object>> aggregateSnapshots(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate) {
+        LocalDate realTradeDate = tradeDate == null ? LocalDate.now() : tradeDate;
+        log.info("市场快照聚合触发: tradeDate={}", realTradeDate);
+        try {
+            return ApiResponse.success(aggregationService.aggregateBoth(realTradeDate));
+        } catch (Exception e) {
+            log.error("市场快照聚合失败: {}", e.getMessage(), e);
+            return ApiResponse.error("聚合失败: " + e.getMessage());
+        }
     }
 
     /**

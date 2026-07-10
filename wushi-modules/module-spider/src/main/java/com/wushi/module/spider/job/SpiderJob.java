@@ -21,7 +21,9 @@ import com.wushi.module.spider.provider.plate.PlateDimensionProvider;
 import com.wushi.module.spider.provider.plate.StockPlateRelationProvider;
 import com.wushi.module.spider.service.SpiderIngestionService;
 import com.wushi.module.spider.ths.ThsPlaywrightSpiderServiceImpl;
+import com.wushi.module.market.service.MarketSnapshotAggregationService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Lazy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -43,6 +45,8 @@ public class SpiderJob {
     private final SpiderIngestionService ingestionService;
     private final ThsPlaywrightSpiderServiceImpl thsSpiderService;
     private final SpiderCheckpointService checkpointService;
+    @Lazy
+    private final MarketSnapshotAggregationService aggregationService;
 
     // 东财 Provider (通过 Spring DI 注入)
     private final List<StockKlineProvider> stockKlineProviders;
@@ -97,6 +101,10 @@ public class SpiderJob {
         // 9. 各股票池快照
         Map<String, Integer> poolResults = runEastMoneyPools(tradeDate);
         result.put("pools", poolResults);
+
+        // 10. 聚合快照
+        Map<String, Object> aggResults = aggregationService.aggregateBoth(tradeDate);
+        result.put("aggregation", aggResults);
 
         long elapsed = System.currentTimeMillis() - startMs;
         result.put("elapsedMs", elapsed);

@@ -32,12 +32,12 @@ wushi:
       browser:
         # 同花顺代理池 (格式: ip:port 或 protocol://ip:port)
         proxy-pool:
-          - 127.0.0.1:7890
+          - 58.19.54.157:16430
         max-proxy-retries: 3
         direct-first: true
     eastmoney:
       # 东财代理池 (独立配置, 格式同上)
       proxy-pool:
-        - 127.0.0.1:7890
+        - 58.19.54.157:16430
       max-proxy-retries: 3
       direct-first: true

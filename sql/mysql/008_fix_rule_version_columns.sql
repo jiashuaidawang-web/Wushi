@@ -1,7 +1,7 @@
 -- ============================================================
 -- 修复 rule_version 表缺失的列
 -- 错误: Unknown column 'source_rule_version' in 'field list'
--- 执行方式: mysql -u root -p wushi < 001_fix_rule_version_columns.sql
+-- 执行方式: mysql -u root -p wushi < 008_fix_rule_version_columns.sql
 -- ============================================================
 
 USE wushi;
