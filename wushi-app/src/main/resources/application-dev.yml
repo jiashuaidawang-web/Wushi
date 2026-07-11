@@ -1,10 +1,10 @@
 spring:
   datasource:
     mysql:
-      jdbc-url: jdbc:mysql://localhost:3306/wushi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      jdbc-url: jdbc:mysql://124.223.220.245:3306/wushi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       username: root
-      password: root
+      password: astock_root
     clickhouse:
-      jdbc-url: jdbc:clickhouse://localhost:8123/wushi
+      jdbc-url: jdbc:clickhouse://124.223.220.245:8123/wushi
       username: default
-      password:
+      password: pamirs@123

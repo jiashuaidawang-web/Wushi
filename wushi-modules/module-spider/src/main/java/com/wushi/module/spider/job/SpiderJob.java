@@ -1,5 +1,6 @@
 package com.wushi.module.spider.job;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.wushi.module.market.domain.row.*;
 import com.wushi.module.spider.checkpoint.SpiderCheckpointService;
 import com.wushi.module.spider.core.SpiderFetchRequest;
@@ -7,7 +8,7 @@ import com.wushi.module.spider.core.SpiderResult;
 import com.wushi.module.spider.core.SpiderWriteResult;
 import com.wushi.module.spider.eastmoney.EastMoneyEndpoint;
 import com.wushi.module.spider.eastmoney.EastMoneyFieldMapper;
-import com.wushi.module.spider.eastmoney.EastMoneySpiderClient;
+import com.wushi.module.spider.eastmoney.EastMoneyPlaywrightClient;
 import com.wushi.module.spider.enums.PoolType;
 import com.wushi.module.spider.enums.SpiderProviderType;
 import com.wushi.module.spider.enums.SpiderTaskStatus;
@@ -32,7 +33,7 @@ import java.util.*;
 
 /**
  * 爬虫跑批任务编排器
- * 协调东财API + 同花顺Playwright 双数据源抓取
+ * 协调东财 Playwright + 同花顺 Playwright 双数据源抓取
  * 支持断点续传: 同一天同一 provider 已成功则跳过
  */
 @Component
@@ -40,7 +41,7 @@ import java.util.*;
 @Slf4j
 public class SpiderJob {
 
-    private final EastMoneySpiderClient eastMoneySpiderClient;
+    private final EastMoneyPlaywrightClient playwrightClient;
     private final EastMoneyFieldMapper fieldMapper;
     private final SpiderIngestionService ingestionService;
     private final ThsPlaywrightSpiderServiceImpl thsSpiderService;
@@ -59,7 +60,7 @@ public class SpiderJob {
     private final List<CapitalFlowProvider> capitalFlowProviders;
 
     /**
-     * 东财全量日跑批
+     * 东财全量日跑批 — 每个子任务 try-catch 隔离，防止级联失败
      */
     public Map<String, Object> runEastMoneyDaily(LocalDate tradeDate) {
         log.info("===== 东财日跑批开始: tradeDate={} =====", tradeDate);
@@ -67,44 +68,64 @@ public class SpiderJob {
         long startMs = System.currentTimeMillis();
 
         // 1. 股票日K
-        int stockDailyInserted = runEastMoneyStockDailyKline(tradeDate);
-        result.put("stockDailyInserted", stockDailyInserted);
+        safeRun("stockDailyKline", tradeDate, () -> {
+            int n = runEastMoneyStockDailyKline(tradeDate);
+            result.put("stockDailyInserted", n);
+        });
 
         // 2. 指数日K
-        int indexDailyInserted = runEastMoneyIndexDailyKline(tradeDate);
-        result.put("indexDailyInserted", indexDailyInserted);
+        safeRun("indexDailyKline", tradeDate, () -> {
+            int n = runEastMoneyIndexDailyKline(tradeDate);
+            result.put("indexDailyInserted", n);
+        });
 
         // 3. 板块维度
-        int plateDimInserted = runEastMoneyPlateDimensions(tradeDate);
-        result.put("plateDimInserted", plateDimInserted);
+        safeRun("plateDimensions", tradeDate, () -> {
+            int n = runEastMoneyPlateDimensions(tradeDate);
+            result.put("plateDimInserted", n);
+        });
 
         // 4. 板块日K
-        int plateKlineInserted = runEastMoneyPlateDailyKline(tradeDate);
-        result.put("plateKlineInserted", plateKlineInserted);
+        safeRun("plateDailyKline", tradeDate, () -> {
+            int n = runEastMoneyPlateDailyKline(tradeDate);
+            result.put("plateKlineInserted", n);
+        });
 
         // 5. 板块个股关系
-        int relationInserted = runEastMoneyPlateRelations(tradeDate);
-        result.put("relationInserted", relationInserted);
+        safeRun("plateRelations", tradeDate, () -> {
+            int n = runEastMoneyPlateRelations(tradeDate);
+            result.put("relationInserted", n);
+        });
 
         // 6. 涨跌停状态
-        int limitStatusInserted = runEastMoneyLimitStatus(tradeDate);
-        result.put("limitStatusInserted", limitStatusInserted);
+        safeRun("limitStatus", tradeDate, () -> {
+            int n = runEastMoneyLimitStatus(tradeDate);
+            result.put("limitStatusInserted", n);
+        });
 
         // 7. 涨停盘中事件
-        int limitEventInserted = runEastMoneyLimitIntradayEvents(tradeDate);
-        result.put("limitEventInserted", limitEventInserted);
+        safeRun("limitIntradayEvents", tradeDate, () -> {
+            int n = runEastMoneyLimitIntradayEvents(tradeDate);
+            result.put("limitEventInserted", n);
+        });
 
         // 8. 资金流向
-        int capitalFlowInserted = runEastMoneyCapitalFlow(tradeDate);
-        result.put("capitalFlowInserted", capitalFlowInserted);
+        safeRun("capitalFlow", tradeDate, () -> {
+            int n = runEastMoneyCapitalFlow(tradeDate);
+            result.put("capitalFlowInserted", n);
+        });
 
         // 9. 各股票池快照
-        Map<String, Integer> poolResults = runEastMoneyPools(tradeDate);
-        result.put("pools", poolResults);
+        safeRun("pools", tradeDate, () -> {
+            Map<String, Integer> poolResults = runEastMoneyPools(tradeDate);
+            result.put("pools", poolResults);
+        });
 
         // 10. 聚合快照
-        Map<String, Object> aggResults = aggregationService.aggregateBoth(tradeDate);
-        result.put("aggregation", aggResults);
+        safeRun("aggregation", tradeDate, () -> {
+            Map<String, Object> aggResults = aggregationService.aggregateBoth(tradeDate);
+            result.put("aggregation", aggResults);
+        });
 
         long elapsed = System.currentTimeMillis() - startMs;
         result.put("elapsedMs", elapsed);
@@ -113,7 +134,18 @@ public class SpiderJob {
     }
 
     /**
-     * 东财股票池跑批(涨停/跌停/强势/连板/炸板)
+     * 任务隔离包装器: 一个任务失败不影响后续任务
+     */
+    private void safeRun(String taskName, LocalDate tradeDate, Runnable task) {
+        try {
+            task.run();
+        } catch (Exception e) {
+            log.error("[{}] 未捕获异常,隔离保护: {}", taskName, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 东财股票池跑批(涨停/跌停/强势/连板/炸板) — 切 Playwright
      */
     public Map<String, Integer> runEastMoneyPools(LocalDate tradeDate) {
         Map<String, Integer> results = new LinkedHashMap<>();
@@ -126,6 +158,8 @@ public class SpiderJob {
                 Map.entry(EastMoneyEndpoint.LIMIT_DOWN_POOL, PoolType.LIMIT_DOWN)
         );
 
+        String dateStr = tradeDate.toString();
+
         for (var entry : poolEndpoints) {
             String taskCode = "pool_" + entry.getValue().getCode();
             try {
@@ -136,9 +170,10 @@ public class SpiderJob {
                 }
                 checkpointService.markRunning(taskCode, taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name());
 
-                EastMoneySpiderClient.EastMoneyPoolResult poolResult =
-                        eastMoneySpiderClient.fetchPool(entry.getKey(), tradeDate);
-                List<StockPoolDailySnapshotRow> rows = poolResult.rows().stream()
+                List<JsonNode> rawRows = new ArrayList<>();
+                playwrightClient.fetchPool(entry.getKey(), rawRows, taskCode, dateStr);
+
+                List<StockPoolDailySnapshotRow> rows = rawRows.stream()
                         .map(node -> fieldMapper.toPoolSnapshot(tradeDate, entry.getValue().getCode(), node))
                         .filter(row -> row.stockCode() != null && !row.stockCode().isBlank())
                         .toList();
@@ -148,7 +183,7 @@ public class SpiderJob {
                         .provider(SpiderProviderType.EAST_MONEY.name())
                         .status(SpiderTaskStatus.SUCCESS)
                         .rows(rows)
-                        .fetchedCount(poolResult.totalCount())
+                        .fetchedCount(rows.size())
                         .successCount(rows.size())
                         .build();
                 SpiderWriteResult writeResult = ingestionService.ingest(spiderResult);
@@ -248,6 +283,8 @@ public class SpiderJob {
         }
     }
 
+    // ========== 东财子任务 ==========
+
     private int runEastMoneyStockDailyKline(LocalDate tradeDate) {
         String taskCode = "stock_daily_kline";
         try {
@@ -264,14 +301,19 @@ public class SpiderJob {
                 if (provider.providerType() == SpiderProviderType.EAST_MONEY) {
                     SpiderResult<StockDailyKlineRow> result = provider.fetchStockDailyKline(request);
                     SpiderWriteResult writeResult = ingestionService.ingest(result);
-                    checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
-                            result.getSuccessCount(), result.getFailedCount(), null);
+                    if (result.getStatus() == SpiderTaskStatus.SUCCESS) {
+                        checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getSuccessCount(), result.getFailedCount(), null);
+                    } else {
+                        checkpointService.markFailed(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getErrorMessage());
+                    }
                     return writeResult.getInsertedCount();
                 }
             }
             return 0;
         } catch (Exception e) {
-            log.error("东财股票日K抓取失败: {}", e.getMessage());
+            log.error("东财股票日K抓取失败: {}", e.getMessage(), e);
             checkpointService.markFailed(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(), e.getMessage());
             return 0;
         }
@@ -293,8 +335,13 @@ public class SpiderJob {
                 if (provider.providerType() == SpiderProviderType.EAST_MONEY) {
                     SpiderResult<IndexDailyKlineRow> result = provider.fetchIndexDailyKline(request);
                     SpiderWriteResult writeResult = ingestionService.ingest(result);
-                    checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
-                            result.getSuccessCount(), result.getFailedCount(), null);
+                    if (result.getStatus() == SpiderTaskStatus.SUCCESS) {
+                        checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getSuccessCount(), result.getFailedCount(), null);
+                    } else {
+                        checkpointService.markFailed(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getErrorMessage());
+                    }
                     return writeResult.getInsertedCount();
                 }
             }
@@ -322,8 +369,13 @@ public class SpiderJob {
                 if (provider.providerType() == SpiderProviderType.EAST_MONEY) {
                     SpiderResult<StockPlateDailyKlineRow> result = provider.fetchPlateDailyKline(request);
                     SpiderWriteResult writeResult = ingestionService.ingest(result);
-                    checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
-                            result.getSuccessCount(), result.getFailedCount(), null);
+                    if (result.getStatus() == SpiderTaskStatus.SUCCESS) {
+                        checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getSuccessCount(), result.getFailedCount(), null);
+                    } else {
+                        checkpointService.markFailed(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getErrorMessage());
+                    }
                     return writeResult.getInsertedCount();
                 }
             }
@@ -351,8 +403,13 @@ public class SpiderJob {
                 if (provider.providerType() == SpiderProviderType.EAST_MONEY) {
                     SpiderResult<StockPlateDimensionRow> result = provider.fetchPlateDimension(request);
                     SpiderWriteResult writeResult = ingestionService.ingest(result);
-                    checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
-                            result.getSuccessCount(), result.getFailedCount(), null);
+                    if (result.getStatus() == SpiderTaskStatus.SUCCESS) {
+                        checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getSuccessCount(), result.getFailedCount(), null);
+                    } else {
+                        checkpointService.markFailed(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getErrorMessage());
+                    }
                     return writeResult.getInsertedCount();
                 }
             }
@@ -380,8 +437,13 @@ public class SpiderJob {
                 if (provider.providerType() == SpiderProviderType.EAST_MONEY) {
                     SpiderResult<StockPlateRelationSnapshotRow> result = provider.fetchStockPlateRelations(request);
                     SpiderWriteResult writeResult = ingestionService.ingest(result);
-                    checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
-                            result.getSuccessCount(), result.getFailedCount(), null);
+                    if (result.getStatus() == SpiderTaskStatus.SUCCESS) {
+                        checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getSuccessCount(), result.getFailedCount(), null);
+                    } else {
+                        checkpointService.markFailed(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getErrorMessage());
+                    }
                     return writeResult.getInsertedCount();
                 }
             }
@@ -409,8 +471,13 @@ public class SpiderJob {
                 if (provider.providerType() == SpiderProviderType.EAST_MONEY) {
                     SpiderResult<StockLimitStatusDailyRow> result = provider.fetchLimitStatus(request);
                     SpiderWriteResult writeResult = ingestionService.ingest(result);
-                    checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
-                            result.getSuccessCount(), result.getFailedCount(), null);
+                    if (result.getStatus() == SpiderTaskStatus.SUCCESS) {
+                        checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getSuccessCount(), result.getFailedCount(), null);
+                    } else {
+                        checkpointService.markFailed(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getErrorMessage());
+                    }
                     return writeResult.getInsertedCount();
                 }
             }
@@ -438,8 +505,13 @@ public class SpiderJob {
                 if (provider.providerType() == SpiderProviderType.EAST_MONEY) {
                     SpiderResult<StockLimitIntradayEventRow> result = provider.fetchLimitIntradayEvents(request);
                     SpiderWriteResult writeResult = ingestionService.ingest(result);
-                    checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
-                            result.getSuccessCount(), result.getFailedCount(), null);
+                    if (result.getStatus() == SpiderTaskStatus.SUCCESS) {
+                        checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getSuccessCount(), result.getFailedCount(), null);
+                    } else {
+                        checkpointService.markFailed(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getErrorMessage());
+                    }
                     return writeResult.getInsertedCount();
                 }
             }
@@ -467,8 +539,13 @@ public class SpiderJob {
                 if (provider.providerType() == SpiderProviderType.EAST_MONEY) {
                     SpiderResult<CapitalFlowDailySnapshotRow> result = provider.fetchCapitalFlow(request);
                     SpiderWriteResult writeResult = ingestionService.ingest(result);
-                    checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
-                            result.getSuccessCount(), result.getFailedCount(), null);
+                    if (result.getStatus() == SpiderTaskStatus.SUCCESS) {
+                        checkpointService.markSuccess(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getSuccessCount(), result.getFailedCount(), null);
+                    } else {
+                        checkpointService.markFailed(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(),
+                                result.getErrorMessage());
+                    }
                     return writeResult.getInsertedCount();
                 }
             }
@@ -477,14 +554,6 @@ public class SpiderJob {
             log.error("东财资金流向抓取失败: {}", e.getMessage());
             checkpointService.markFailed(taskCode, tradeDate, SpiderProviderType.EAST_MONEY.name(), e.getMessage());
             return 0;
-        }
-    }
-
-    private void sleep(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
         }
     }
 }

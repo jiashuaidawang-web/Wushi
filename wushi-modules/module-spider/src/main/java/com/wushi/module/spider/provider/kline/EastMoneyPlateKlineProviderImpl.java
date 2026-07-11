@@ -1,11 +1,12 @@
 package com.wushi.module.spider.provider.kline;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.wushi.module.market.domain.row.StockPlateDailyKlineRow;
 import com.wushi.module.spider.core.SpiderFetchRequest;
 import com.wushi.module.spider.core.SpiderResult;
 import com.wushi.module.spider.eastmoney.EastMoneyEndpoint;
 import com.wushi.module.spider.eastmoney.EastMoneyFieldMapper;
-import com.wushi.module.spider.eastmoney.EastMoneySpiderClient;
+import com.wushi.module.spider.eastmoney.EastMoneyPlaywrightClient;
 import com.wushi.module.spider.enums.SpiderProviderType;
 import com.wushi.module.spider.enums.SpiderTaskStatus;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +22,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class EastMoneyPlateKlineProviderImpl implements PlateKlineProvider {
 
-    private final EastMoneySpiderClient eastMoneySpiderClient;
+    private final EastMoneyPlaywrightClient playwrightClient;
     private final EastMoneyFieldMapper fieldMapper;
 
     @Override
@@ -43,34 +44,23 @@ public class EastMoneyPlateKlineProviderImpl implements PlateKlineProvider {
 
         try {
             for (int i = 0; i < plateEndpoints.size(); i++) {
-                var result = eastMoneySpiderClient.fetchPaged(plateEndpoints.get(i));
+                List<JsonNode> rawRows = new ArrayList<>();
+                int total = playwrightClient.fetchAllPages(plateEndpoints.get(i), rawRows, "plate_daily_" + plateTypes.get(i));
                 String plateType = plateTypes.get(i);
-                List<StockPlateDailyKlineRow> rows = result.rows().stream()
+                List<StockPlateDailyKlineRow> rows = rawRows.stream()
                         .map(node -> {
                             StockPlateDailyKlineRow raw = fieldMapper.toPlateDailyKline(tradeDate, node);
                             return new StockPlateDailyKlineRow(
-                                    raw.tradeDate(),
-                                    raw.plateCode(),
-                                    raw.plateName(),
-                                    plateType,
-                                    raw.open(),
-                                    raw.high(),
-                                    raw.low(),
-                                    raw.close(),
-                                    raw.preClose(),
-                                    raw.changePct(),
-                                    raw.volume(),
-                                    raw.amount(),
-                                    raw.turnoverRate(),
-                                    raw.mainNetInflow(),
-                                    raw.source()
-                            );
+                                    raw.tradeDate(), raw.plateCode(), raw.plateName(), plateType,
+                                    raw.open(), raw.high(), raw.low(), raw.close(), raw.preClose(),
+                                    raw.changePct(), raw.volume(), raw.amount(), raw.turnoverRate(),
+                                    raw.mainNetInflow(), raw.source());
                         })
                         .filter(row -> row.plateCode() != null && !row.plateCode().isBlank())
                         .toList();
                 allRows.addAll(rows);
-                totalFetched += result.totalCount();
-                log.info("东财板块日K[{}]: total={}, mapped={}", plateType, result.totalCount(), rows.size());
+                totalFetched += total;
+                log.info("东财板块日K[{}]: total={}, mapped={}", plateType, total, rows.size());
             }
             log.info("东财板块日K抓取完成: total={}, mapped={}", totalFetched, allRows.size());
             return SpiderResult.<StockPlateDailyKlineRow>builder()

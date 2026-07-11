@@ -9,7 +9,6 @@ import com.wushi.module.spider.eastmoney.EastMoneyFieldMapper;
 import com.wushi.module.spider.eastmoney.EastMoneyPlaywrightClient;
 import com.wushi.module.spider.enums.SpiderProviderType;
 import com.wushi.module.spider.enums.SpiderTaskStatus;
-import com.wushi.module.spider.provider.kline.StockKlineProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -23,6 +22,9 @@ import java.util.List;
 @RequiredArgsConstructor
 public class EastMoneyStockKlineProviderImpl implements StockKlineProvider {
 
+    /** 如果实际抓取行数 < API total 的此比例，视为抓取不完整，标记失败 */
+    private static final double MIN_FETCH_RATIO = 0.95;
+
     private final EastMoneyPlaywrightClient playwrightClient;
     private final EastMoneyFieldMapper fieldMapper;
 
@@ -35,22 +37,33 @@ public class EastMoneyStockKlineProviderImpl implements StockKlineProvider {
         log.info("开始抓取东财股票日K: tradeDate={}", tradeDate);
         try {
             List<JsonNode> rawRows = new ArrayList<>();
-            int total = playwrightClient.fetchAllStocks(rawRows);
+            int fetchedCount = playwrightClient.fetchAllStocks(rawRows);
             List<StockDailyKlineRow> rows = rawRows.stream()
                     .map(node -> fieldMapper.toStockDailyKline(tradeDate, node))
                     .filter(row -> row.stockCode() != null && !row.stockCode().isBlank())
                     .toList();
-            log.info("东财股票日K抓取完成: total={}, mapped={}", total, rows.size());
-            if (total == 0) {
-                log.error("东财股票日K抓取结果为空，标记为失败");
+            log.info("东财股票日K抓取完成: fetched={}, mapped={}", fetchedCount, rows.size());
+
+            if (fetchedCount == 0) {
                 return SpiderResult.<StockDailyKlineRow>builder()
                         .taskCode("stock_daily_kline").provider(SpiderProviderType.EAST_MONEY.name())
-                        .status(SpiderTaskStatus.FAILED).errorMessage("Playwright 抓取返回 0 条数据").build();
+                        .status(SpiderTaskStatus.FAILED).errorMessage("Playwright 抓取返回 0 条").build();
             }
+
+            // 完整性校验：抓取数量不能明显少于预期
+            if (fetchedCount < 1000 || rows.size() < fetchedCount * MIN_FETCH_RATIO) {
+                log.warn("东财股票日K抓取不完整: fetched={}, mapped={}, 标记FAILED以便重试", fetchedCount, rows.size());
+                return SpiderResult.<StockDailyKlineRow>builder()
+                        .taskCode("stock_daily_kline").provider(SpiderProviderType.EAST_MONEY.name())
+                        .status(SpiderTaskStatus.FAILED)
+                        .errorMessage("抓取不完整: fetched=" + fetchedCount + ", mapped=" + rows.size())
+                        .rows(rows).fetchedCount(fetchedCount).successCount(rows.size()).build();
+            }
+
             return SpiderResult.<StockDailyKlineRow>builder()
                     .taskCode("stock_daily_kline").provider(SpiderProviderType.EAST_MONEY.name())
                     .status(SpiderTaskStatus.SUCCESS).rows(rows)
-                    .fetchedCount(total).successCount(rows.size()).build();
+                    .fetchedCount(fetchedCount).successCount(rows.size()).build();
         } catch (Exception e) {
             log.error("东财股票日K抓取失败: {}", e.getMessage(), e);
             return SpiderResult.<StockDailyKlineRow>builder()

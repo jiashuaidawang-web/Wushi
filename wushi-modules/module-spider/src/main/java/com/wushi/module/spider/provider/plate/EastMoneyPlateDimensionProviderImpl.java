@@ -1,14 +1,14 @@
 package com.wushi.module.spider.provider.plate;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.wushi.module.market.domain.row.StockPlateDimensionRow;
 import com.wushi.module.spider.core.SpiderFetchRequest;
 import com.wushi.module.spider.core.SpiderResult;
 import com.wushi.module.spider.eastmoney.EastMoneyEndpoint;
 import com.wushi.module.spider.eastmoney.EastMoneyFieldMapper;
-import com.wushi.module.spider.eastmoney.EastMoneySpiderClient;
+import com.wushi.module.spider.eastmoney.EastMoneyPlaywrightClient;
 import com.wushi.module.spider.enums.SpiderProviderType;
 import com.wushi.module.spider.enums.SpiderTaskStatus;
-import com.wushi.module.spider.provider.plate.PlateDimensionProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -22,7 +22,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class EastMoneyPlateDimensionProviderImpl implements PlateDimensionProvider {
 
-    private final EastMoneySpiderClient eastMoneySpiderClient;
+    private final EastMoneyPlaywrightClient playwrightClient;
     private final EastMoneyFieldMapper fieldMapper;
 
     @Override
@@ -30,8 +30,7 @@ public class EastMoneyPlateDimensionProviderImpl implements PlateDimensionProvid
 
     @Override
     public SpiderResult<StockPlateDimensionRow> fetchPlateDimension(SpiderFetchRequest request) {
-        LocalDate tradeDate = request.getTradeDate();
-        log.info("开始抓取东财板块维度: tradeDate={}", tradeDate);
+        log.info("开始抓取东财板块维度");
         try {
             List<StockPlateDimensionRow> dimensions = new ArrayList<>();
             fetchPlates(EastMoneyEndpoint.REGION_PLATE, "REGION", dimensions);
@@ -52,8 +51,9 @@ public class EastMoneyPlateDimensionProviderImpl implements PlateDimensionProvid
 
     private void fetchPlates(EastMoneyEndpoint endpoint, String plateType, List<StockPlateDimensionRow> dimensions) {
         try {
-            var result = eastMoneySpiderClient.fetchPaged(endpoint);
-            result.rows().forEach(node -> {
+            List<JsonNode> rawRows = new ArrayList<>();
+            playwrightClient.fetchAllPages(endpoint, rawRows, "plate_dim_" + plateType);
+            rawRows.forEach(node -> {
                 StockPlateDimensionRow dim = fieldMapper.toPlateDimension(node);
                 dimensions.add(new StockPlateDimensionRow(dim.plateCode(), dim.plateName(), plateType,
                         dim.parentPlateCode(), dim.status(), dim.source()));

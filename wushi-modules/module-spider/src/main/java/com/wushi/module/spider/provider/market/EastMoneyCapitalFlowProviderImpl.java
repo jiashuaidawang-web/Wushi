@@ -1,11 +1,12 @@
 package com.wushi.module.spider.provider.market;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.wushi.module.market.domain.row.CapitalFlowDailySnapshotRow;
 import com.wushi.module.spider.core.SpiderFetchRequest;
 import com.wushi.module.spider.core.SpiderResult;
 import com.wushi.module.spider.eastmoney.EastMoneyEndpoint;
 import com.wushi.module.spider.eastmoney.EastMoneyFieldMapper;
-import com.wushi.module.spider.eastmoney.EastMoneySpiderClient;
+import com.wushi.module.spider.eastmoney.EastMoneyPlaywrightClient;
 import com.wushi.module.spider.enums.SpiderProviderType;
 import com.wushi.module.spider.enums.SpiderTaskStatus;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -20,7 +22,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class EastMoneyCapitalFlowProviderImpl implements CapitalFlowProvider {
 
-    private final EastMoneySpiderClient eastMoneySpiderClient;
+    private final EastMoneyPlaywrightClient playwrightClient;
     private final EastMoneyFieldMapper fieldMapper;
 
     @Override
@@ -31,16 +33,17 @@ public class EastMoneyCapitalFlowProviderImpl implements CapitalFlowProvider {
         LocalDate tradeDate = request.getTradeDate();
         log.info("开始抓取东财资金流向: tradeDate={}", tradeDate);
         try {
-            var result = eastMoneySpiderClient.fetchPaged(EastMoneyEndpoint.CAPITAL_FLOW);
-            List<CapitalFlowDailySnapshotRow> rows = result.rows().stream()
+            List<JsonNode> rawRows = new ArrayList<>();
+            int total = playwrightClient.fetchAllPages(EastMoneyEndpoint.CAPITAL_FLOW, rawRows, "capital_flow");
+            List<CapitalFlowDailySnapshotRow> rows = rawRows.stream()
                     .map(node -> fieldMapper.toCapitalFlowDailySnapshot(tradeDate, node))
                     .filter(row -> row.targetCode() != null && !row.targetCode().isBlank())
                     .toList();
-            log.info("东财资金流向抓取完成: total={}, mapped={}", result.totalCount(), rows.size());
+            log.info("东财资金流向抓取完成: total={}, mapped={}", total, rows.size());
             return SpiderResult.<CapitalFlowDailySnapshotRow>builder()
                     .taskCode("capital_flow").provider(SpiderProviderType.EAST_MONEY.name())
                     .status(SpiderTaskStatus.SUCCESS).rows(rows)
-                    .fetchedCount(result.totalCount()).successCount(rows.size()).build();
+                    .fetchedCount(total).successCount(rows.size()).build();
         } catch (Exception e) {
             log.error("东财资金流向抓取失败: {}", e.getMessage(), e);
             return SpiderResult.<CapitalFlowDailySnapshotRow>builder()
