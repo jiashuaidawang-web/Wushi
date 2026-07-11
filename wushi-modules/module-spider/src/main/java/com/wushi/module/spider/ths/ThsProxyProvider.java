@@ -83,7 +83,7 @@ public class ThsProxyProvider {
         // 2. 从代理供应商获取
         if (StringUtils.hasText(properties.getProxyProviderUrl())) {
             try {
-                String body = httpClient.get(properties.getProxyProviderUrl());
+                String body = httpClient.simpleGet(properties.getProxyProviderUrl());
                 Set<String> parsed = parseProxies(body);
                 candidates.addAll(parsed);
                 log.info("从供应商获取代理: count={}", parsed.size());

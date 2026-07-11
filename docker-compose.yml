@@ -1,36 +1,86 @@
+version: "3.8"
+
 services:
   mysql:
-    image: mysql:8.4
+    image: mysql:8.0
     container_name: wushi-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_PASSWORD: astock_root
       MYSQL_DATABASE: wushi
       TZ: Asia/Shanghai
     ports:
       - "3306:3306"
     volumes:
       - wushi-mysql:/var/lib/mysql
+    networks:
+      - wushi-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   clickhouse:
-    image: clickhouse/clickhouse-server:24.8
+    image: clickhouse/clickhouse-server:23.8
     container_name: wushi-clickhouse
     environment:
       CLICKHOUSE_DB: wushi
       CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD:
+      CLICKHOUSE_PASSWORD: pamirs@123
       TZ: Asia/Shanghai
     ports:
       - "8123:8123"
       - "9000:9000"
     volumes:
       - wushi-clickhouse:/var/lib/clickhouse
+    networks:
+      - wushi-net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  selenium:
-    image: selenium/standalone-chrome:4.27.0
-    container_name: wushi-selenium
-    shm_size: 2gb
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wushi-backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment:
+      # === 数据源配置 ===
+      SPRING_DATASOURCE_MYSQL_JDBC_URL: jdbc:mysql://wushi-mysql:3306/wushi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_MYSQL_USERNAME: root
+      SPRING_DATASOURCE_MYSQL_PASSWORD: astock_root
+      SPRING_DATASOURCE_CLICKHOUSE_JDBC_URL: jdbc:clickhouse://wushi-clickhouse:8123/wushi
+      SPRING_DATASOURCE_CLICKHOUSE_USERNAME: default
+      SPRING_DATASOURCE_CLICKHOUSE_PASSWORD: pamirs@123
+      # === Playwright 配置 ===
+      # 使用内嵌 Chromium（Dockerfile 已安装）
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      # 如果需要连接外部 selenium-chrome，取消下面注释：
+      # PLAYWRIGHT_CDP_URL: http://astock-selenium-chrome:4444
+      TZ: Asia/Shanghai
     ports:
-      - "4444:4444"
+      - "8080:8080"
+    networks:
+      - wushi-net
+    restart: unless-stopped
+    # Playwright 跑 Chromium 需要共享内存，否则会崩
+    shm_size: 2gb
+    # 需要更多内存给 Chromium
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+
+networks:
+  wushi-net:
+    driver: bridge
 
 volumes:
   wushi-mysql:
