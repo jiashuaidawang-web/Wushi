@@ -1,37 +1,22 @@
+version: '3.8'
+
 services:
-  mysql:
-    image: mysql:8.4
-    container_name: wushi-mysql
+  wushi-backend:
+    image: crpi-ecp3xwjlx8lx75f1.cn-hangzhou.personal.cr.aliyuncs.com/wushi-space/wushi-backend:v1.0.0
+    container_name: wushi-backend-service
+    network_mode: "host" # 走 host 模式，让容器共享宿主机的 Tailscale 内网网卡
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: wushi
-      TZ: Asia/Shanghai
-    ports:
-      - "3306:3306"
-    volumes:
-      - wushi-mysql:/var/lib/mysql
+      - DB_HOST=100.97.74.45   # 填入你真实的 MySQL Tailscale 内网 IP
+      - DB_USER=root
+      - DB_PASSWORD=astock_root
+      - CK_HOST=100.97.74.45   # 填入你真实的 ClickHouse Tailscale 内网 IP
+      - CK_USER=default
+      - CK_PASSWORD=pamirs@123
+    restart: always
 
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.8
-    container_name: wushi-clickhouse
-    environment:
-      CLICKHOUSE_DB: wushi
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD:
-      TZ: Asia/Shanghai
+  wushi-frontend:
+    image: crpi-ecp3xwjlx8lx75f1.cn-hangzhou.personal.cr.aliyuncs.com/wushi-space/wushi-frontend:v1.0.0
+    container_name: wushi-frontend-service
     ports:
-      - "8123:8123"
-      - "9000:9000"
-    volumes:
-      - wushi-clickhouse:/var/lib/clickhouse
-
-  selenium:
-    image: selenium/standalone-chrome:4.27.0
-    container_name: wushi-selenium
-    shm_size: 2gb
-    ports:
-      - "4444:4444"
-
-volumes:
-  wushi-mysql:
-  wushi-clickhouse:
+      - "80:80"
+    restart: always

@@ -1,0 +1,91 @@
+name: Docker Build, Push and Deploy (JDK21 & Tailscale)
+
+on:
+  push:
+    branches:
+      - main  # 监听 main 分支的 push 事件
+
+env:
+  REGISTRY: crpi-ecp3xwjlx8lx75f1.cn-hangzhou.personal.cr.aliyuncs.com
+  NAMESPACE: wushi-space
+  TAG: v1.0.0
+
+jobs:
+  # 1. 后端镜像构建
+  build-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Log in to Aliyun ACR
+        uses: aliyun/acr-login-action@v1
+        with:
+          login-server: ${{ env.REGISTRY }}
+          username: ${{ secrets.ALIYUN_REGISTRY_USER }}
+          password: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+      - name: Build and Push Backend Image
+        run: |
+          IMAGE_NAME=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/wushi-backend:${{ env.TAG }}
+          docker build -t $IMAGE_NAME .
+          docker push $IMAGE_NAME
+
+  # 2. 前端镜像构建
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Log in to Aliyun ACR
+        uses: aliyun/acr-login-action@v1
+        with:
+          login-server: ${{ env.REGISTRY }}
+          username: ${{ secrets.ALIYUN_REGISTRY_USER }}
+          password: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+      - name: Build and Push Frontend Image
+        run: |
+          cd wushi-web
+          IMAGE_NAME=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/wushi-frontend:${{ env.TAG }}
+          docker build -t $IMAGE_NAME .
+          docker push $IMAGE_NAME
+
+  # 3. 自动化部署任务
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+    steps:
+      - name: SSH Deploy to Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            # 登录阿里云
+            docker login --username=${{ secrets.ALIYUN_REGISTRY_USER }} --password=${{ secrets.ALIYUN_REGISTRY_PASSWORD }} ${{ env.REGISTRY }}
+            
+            # 停止并重启后端（使用 host 网络模式，无缝走宿主机的 Tailscale 内网）
+            docker stop wushi-backend-container || true
+            docker rm wushi-backend-container || true
+            docker pull ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/wushi-backend:${{ env.TAG }}
+            docker run -d \
+              --name wushi-backend-container \
+              --network host \
+              -e DB_HOST=100.x.x.mysql_ip \
+              -e DB_USER=${{ secrets.DB_USER }} \
+              -e DB_PASSWORD=${{ secrets.DB_PASSWORD }} \
+              -e CK_HOST=100.x.x.ck_ip \
+              --restart always \
+              ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/wushi-backend:${{ env.TAG }}
+            
+            # 停止并重启前端
+            docker stop wushi-frontend-container || true
+            docker rm wushi-frontend-container || true
+            docker pull ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/wushi-frontend:${{ env.TAG }}
+            docker run -d \
+              --name wushi-frontend-container \
+              -p 80:80 \
+              --restart always \
+              ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/wushi-frontend:${{ env.TAG }}
+            
+            # 清理无用镜像碎屑
+            docker image prune -f
