@@ -1,19 +1,20 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8081} # 支持动态修改容器端口，默认 8080
 
 spring:
   application:
     name: wushi
   datasource:
     mysql:
-      jdbc-url: jdbc:mysql://124.223.220.245:3306/wushi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
-      username: root
-      password: astock_root
+      # 用 ${变量名:默认值} 的形式，默认连你的公网IP，但允许通过Docker环境变量动态覆盖为Tailscale内网IP
+      jdbc-url: jdbc:mysql://${DB_HOST:124.223.220.245}:${DB_PORT:3306}/wushi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      username: ${DB_USER:root}
+      password: ${DB_PASSWORD:astock_root} # 冒号后面是你当前的默认密码
       driver-class-name: com.mysql.cj.jdbc.Driver
     clickhouse:
-      jdbc-url: jdbc:clickhouse://124.223.220.245:8123/wushi
-      username: default
-      password: pamirs@123
+      jdbc-url: jdbc:clickhouse://${CK_HOST:124.223.220.245}:${CK_PORT:8123}/wushi
+      username: ${CK_USER:default}
+      password: ${CK_PASSWORD:pamirs@123}
       driver-class-name: com.clickhouse.jdbc.ClickHouseDriver
 
 management:
@@ -26,7 +27,8 @@ wushi:
   engine:
     default-rule-version: v0.1.0
   selenium:
-    remote-url: http://localhost:4444/wd/hub
+    # 既然是无状态，跨机器运行时 Selenium 的地址也建议改为支持动态配置
+    remote-url: http://${SELENIUM_HOST:localhost}:4444/wd/hub
   spider:
     ths:
       browser:
