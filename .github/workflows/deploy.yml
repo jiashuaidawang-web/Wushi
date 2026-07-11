@@ -18,7 +18,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 【已修复】使用纯原生命令登录阿里云
+      # 【严格修正】改为标准的双横杠 --username
       - name: Log in to Aliyun ACR
         run: |
           echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login ${{ env.REGISTRY }} --username "${{ secrets.ALIYUN_REGISTRY_USER }}" --password-stdin
@@ -36,7 +36,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 【已修复】使用纯原生命令登录阿里云
+      # 【严格修正】改为标准的双横杠 --username
       - name: Log in to Aliyun ACR
         run: |
           echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login ${{ env.REGISTRY }} --username "${{ secrets.ALIYUN_REGISTRY_USER }}" --password-stdin
@@ -60,7 +60,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            # 登录阿里云
+            # 【严格修正】改为标准的双横杠 --username
             echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login ${{ env.REGISTRY }} --username "${{ secrets.ALIYUN_REGISTRY_USER }}" --password-stdin
             
             # 停止并重启后端（使用 host 网络模式，无缝走宿主机的 Tailscale 内网）
