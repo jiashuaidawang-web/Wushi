@@ -17,12 +17,12 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      # 【已修复】使用纯原生命令登录阿里云
       - name: Log in to Aliyun ACR
-        uses: aliyun/acr-login-action@v1
-        with:
-          login-server: ${{ env.REGISTRY }}
-          username: ${{ secrets.ALIYUN_REGISTRY_USER }}
-          password: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+        run: |
+          echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login ${{ env.REGISTRY }} --username "${{ secrets.ALIYUN_REGISTRY_USER }}" --password-stdin
+
       - name: Build and Push Backend Image
         run: |
           IMAGE_NAME=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/wushi-backend:${{ env.TAG }}
@@ -35,12 +35,12 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      # 【已修复】使用纯原生命令登录阿里云
       - name: Log in to Aliyun ACR
-        uses: aliyun/acr-login-action@v1
-        with:
-          login-server: ${{ env.REGISTRY }}
-          username: ${{ secrets.ALIYUN_REGISTRY_USER }}
-          password: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+        run: |
+          echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login ${{ env.REGISTRY }} --username "${{ secrets.ALIYUN_REGISTRY_USER }}" --password-stdin
+
       - name: Build and Push Frontend Image
         run: |
           cd wushi-web
@@ -61,7 +61,7 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             # 登录阿里云
-            docker login --username=${{ secrets.ALIYUN_REGISTRY_USER }} --password=${{ secrets.ALIYUN_REGISTRY_PASSWORD }} ${{ env.REGISTRY }}
+            echo "${{ secrets.ALIYUN_REGISTRY_PASSWORD }}" | docker login ${{ env.REGISTRY }} --username "${{ secrets.ALIYUN_REGISTRY_USER }}" --password-stdin
             
             # 停止并重启后端（使用 host 网络模式，无缝走宿主机的 Tailscale 内网）
             docker stop wushi-backend-container || true
