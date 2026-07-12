@@ -2,8 +2,8 @@ package com.wushi.module.spider.audit.impl;
 
 import com.wushi.module.market.enums.FactTable;
 import com.wushi.module.spider.audit.SpiderValidationService;
-import com.wushi.module.spider.domain.DataSyncAuditLogEntity;
-import com.wushi.module.spider.mapper.DataSyncAuditLogMapper;
+import com.wushi.module.spider.audit.mapper.DataSyncAuditLogMapper;
+import com.wushi.module.spider.audit.entity.DataSyncAuditLogEntity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -92,7 +92,6 @@ public class SpiderValidationServiceImpl implements SpiderValidationService {
             entity.setUpdatedCount(0);
             entity.setFailedCount(0);
             entity.setErrorMessage("数据校验未通过: count=" + count);
-            entity.setCreatedAt(LocalDateTime.now());
             auditLogMapper.insert(entity);
         } catch (Exception e) {
             log.error("写入审计日志失败: table={}, error={}", tableName, e.getMessage());

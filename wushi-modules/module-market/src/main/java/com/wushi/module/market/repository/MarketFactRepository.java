@@ -16,4 +16,9 @@ public interface MarketFactRepository {
     List<Map<String, Object>> findByTradeDate(FactTable table, LocalDate tradeDate);
 
     List<Map<String, Object>> findByTradeDateAndCode(FactTable table, LocalDate tradeDate, String codeColumn, String code);
+
+    /**
+     * 金融级对账:验证 ClickHouse 某表某日是否有数据
+     */
+    int countByTradeDate(String tableName, LocalDate tradeDate);
 }

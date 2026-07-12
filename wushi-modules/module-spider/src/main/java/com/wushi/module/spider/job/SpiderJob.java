@@ -556,4 +556,24 @@ public class SpiderJob {
             return 0;
         }
     }
+
+    /**
+     * 按 task_code 跑单个东财任务 — 给 BatchOrchestratorService 用
+     */
+    public int runEastMoneyByTaskCode(String taskCode, LocalDate tradeDate) {
+        return switch (taskCode) {
+            case "stock_daily_kline" -> runEastMoneyStockDailyKline(tradeDate);
+            case "index_daily_kline" -> runEastMoneyIndexDailyKline(tradeDate);
+            case "plate_kline", "plate_daily_kline" -> runEastMoneyPlateDailyKline(tradeDate);
+            case "plate_dimension" -> runEastMoneyPlateDimensions(tradeDate);
+            case "plate_relation" -> runEastMoneyPlateRelations(tradeDate);
+            case "limit_status_daily" -> runEastMoneyLimitStatus(tradeDate);
+            case "limit_intraday_event" -> runEastMoneyLimitIntradayEvents(tradeDate);
+            case "capital_flow" -> runEastMoneyCapitalFlow(tradeDate);
+            default -> {
+                log.warn("未知 taskCode: {}", taskCode);
+                yield 0;
+            }
+        };
+    }
 }

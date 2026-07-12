@@ -1,9 +1,9 @@
 package com.wushi.module.spider.checkpoint.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.wushi.module.spider.audit.entity.SpiderTaskCheckpointEntity;
+import com.wushi.module.spider.audit.mapper.SpiderTaskCheckpointMapper;
 import com.wushi.module.spider.checkpoint.SpiderCheckpointService;
-import com.wushi.module.spider.domain.SpiderTaskCheckpointEntity;
-import com.wushi.module.spider.mapper.SpiderTaskCheckpointMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

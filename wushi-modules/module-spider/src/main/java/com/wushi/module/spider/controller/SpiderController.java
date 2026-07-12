@@ -2,6 +2,8 @@ package com.wushi.module.spider.controller;
 
 import com.wushi.module.spider.job.SpiderJob;
 import com.wushi.module.market.service.MarketSnapshotAggregationService;
+import com.wushi.module.spider.audit.service.SpiderAuditService;
+import com.wushi.module.spider.audit.service.SpiderBatchOrchestratorService;
 import com.wushi.module.spider.ths.ThsProxyProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,6 +14,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -21,6 +26,8 @@ import java.util.Map;
 public class SpiderController {
 
     private final SpiderJob spiderJob;
+    private final SpiderBatchOrchestratorService batchOrchestratorService;
+    private final SpiderAuditService auditService;
     private final ThsProxyProvider thsProxyProvider;
     private final MarketSnapshotAggregationService aggregationService;
 
@@ -130,6 +137,73 @@ public class SpiderController {
         } catch (Exception e) {
             log.error("市场快照聚合失败: {}", e.getMessage(), e);
             return ApiResponse.error("聚合失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 【长期方案】带完整对账 + 指数退避重试的跑批
+     * GET /api/spider/dc/daily/complete?tradeDate=2026-07-08
+     *
+     * 遇到 502 等瞬态错误会自动重试(最多 5 轮),每轮退避 10s → 20s → 40s → 80s
+     * 返回: {tradeDate, complete=true/false, elapsedMs}
+     */
+    @GetMapping("/dc/daily/complete")
+    public ApiResponse<Map<String, Object>> runDailyComplete(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate) {
+        LocalDate realTradeDate = tradeDate == null ? LocalDate.now() : tradeDate;
+        log.info("触发[完整版]跑批: tradeDate={}", realTradeDate);
+        long startMs = System.currentTimeMillis();
+        try {
+            boolean complete = batchOrchestratorService.runUntilComplete(realTradeDate);
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("tradeDate", realTradeDate.toString());
+            data.put("complete", complete);
+            data.put("elapsedMs", System.currentTimeMillis() - startMs);
+            if (!complete) {
+                data.put("detail", "达到最大重试次数后仍有失败,请查看审计日志");
+                data.put("failedTasks", auditService.findFailedTasks(realTradeDate).stream()
+                        .map(com.wushi.module.spider.audit.entity.SpiderTaskCheckpointEntity::getTaskCode)
+                        .distinct().toList());
+            }
+            return ApiResponse.success(data);
+        } catch (Exception e) {
+            log.error("完整版跑批失败: {}", e.getMessage(), e);
+            return ApiResponse.error("跑批异常: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 对账查询 API — 查看某交易日所有任务状态
+     * GET /api/spider/dc/daily/status?tradeDate=2026-07-08
+     *
+     * 返回每个 task 的 status(SUCCESS/FAILED/PARTIAL)、successCount、failCount
+     */
+    @GetMapping("/dc/daily/status")
+    public ApiResponse<Map<String, Object>> checkStatus(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate) {
+        LocalDate realTradeDate = tradeDate == null ? LocalDate.now() : tradeDate;
+        log.info("触发对账查询: tradeDate={}", realTradeDate);
+        try {
+            List<com.wushi.module.spider.audit.entity.SpiderTaskCheckpointEntity> all =
+                    auditService.findAllTasks(realTradeDate);
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("tradeDate", realTradeDate.toString());
+            data.put("totalTasks", all.size());
+            data.put("allTasks", all.stream().map(t -> {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("taskCode", t.getTaskCode());
+                row.put("status", t.getStatus());
+                row.put("successCount", t.getSuccessCount());
+                row.put("failCount", t.getFailCount());
+                row.put("errorMessage", t.getErrorMessage());
+                row.put("startedAt", t.getStartedAt() != null ? t.getStartedAt().toString() : null);
+                row.put("finishedAt", t.getFinishedAt() != null ? t.getFinishedAt().toString() : null);
+                return row;
+            }).toList());
+            return ApiResponse.success(data);
+        } catch (Exception e) {
+            log.error("对账查询失败: {}", e.getMessage(), e);
+            return ApiResponse.error("对账异常: " + e.getMessage());
         }
     }
 

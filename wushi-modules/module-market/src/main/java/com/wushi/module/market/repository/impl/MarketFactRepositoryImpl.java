@@ -83,9 +83,9 @@ public class MarketFactRepositoryImpl implements MarketFactRepository {
         if (val instanceof Number) return val.toString();
         if (val instanceof BigDecimal) return ((BigDecimal) val).toPlainString();
         if (val instanceof LocalDate) return "'" + val + "'";
-        // LocalDateTime → 显式格式化为 'yyyy-MM-dd HH:mm:ss.SSS' (ClickHouse 接受毫秒)
+        // LocalDateTime → 显式格式化为 'yyyy-MM-dd HH:mm:ss' (ClickHouse DateTime 不支持毫秒)
         String str = (val instanceof LocalDateTime)
-                ? ((LocalDateTime) val).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"))
+                ? ((LocalDateTime) val).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
                 : val.toString();
         return "'" + str.replace("'", "''") + "'";
     }
@@ -151,5 +151,23 @@ public class MarketFactRepositoryImpl implements MarketFactRepository {
         if (!codeColumn.matches("[a-zA-Z0-9_]+")) {
             throw new BusinessException("MARKET_INVALID_CODE_COLUMN", "invalid code column: " + codeColumn);
         }
+    }
+
+    /**
+     * 金融级对账:查 ClickHouse 某表某日的真实行数
+     */
+    @Override
+    public int countByTradeDate(String tableName, LocalDate tradeDate) {
+        String sql = "SELECT count() FROM " + tableName + " WHERE trade_date = '" + tradeDate + "'";
+        try (Connection conn = clickHouseDataSource.getConnection();
+             Statement stmt = conn.createStatement();
+             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
+            if (rs.next()) {
+                return rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            log.error("countByTradeDate 失败: table={}, tradeDate={}, err={}", tableName, tradeDate, e.getMessage());
+        }
+        return 0;
     }
 }
