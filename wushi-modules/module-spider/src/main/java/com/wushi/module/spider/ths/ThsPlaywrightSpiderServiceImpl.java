@@ -6,6 +6,7 @@ import com.wushi.module.market.domain.row.StockPlateDimensionRow;
 import com.wushi.module.market.domain.row.StockPlateRelationSnapshotRow;
 import com.wushi.module.spider.common.SpiderHttpClient;
 import com.wushi.module.spider.eastmoney.KuaidailiProxyRefresher;
+import com.wushi.module.spider.eastmoney.EastMoneyPlaywrightClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -270,6 +271,9 @@ public class ThsPlaywrightSpiderServiceImpl {
             "Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });" +
             "Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });"
         );
+        // Cookie 预热:先访问同花顺主站种 Session Cookie
+        com.wushi.module.spider.eastmoney.EastMoneyPlaywrightClient.warmupForSite(
+                context, "https://stockpage.10jqka.com.cn/");
         return context;
     }
 

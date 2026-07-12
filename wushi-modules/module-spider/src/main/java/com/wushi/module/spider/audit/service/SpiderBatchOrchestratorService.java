@@ -34,7 +34,12 @@ public class SpiderBatchOrchestratorService {
 
     public boolean runUntilComplete(LocalDate tradeDate) {
         String auditId = auditService.generateAuditId();
-        LocalDateTime cutoffTime = tradeDate.atTime(23, 59, 59);
+        // 截止时间:max(tradeDate+1天 23:59, 今天 23:59) — 跑历史数据也有足够时间重试
+        LocalDateTime cutoffTime = tradeDate.plusDays(1).atTime(23, 59, 59);
+        LocalDateTime todayCutoff = LocalDate.now().atTime(23, 59, 59);
+        if (todayCutoff.isAfter(cutoffTime)) {
+            cutoffTime = todayCutoff;
+        }
 
         Set<String> everSucceeded = new HashSet<>(findSucceededTasks(tradeDate));
         log.info("===== 跑批启动: tradeDate={}, everSucceeded={} =====", tradeDate, everSucceeded);

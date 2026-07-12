@@ -3,6 +3,7 @@ package com.wushi.module.spider.eastmoney;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.playwright.*;
+import com.microsoft.playwright.options.LoadState;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -82,22 +83,55 @@ public class EastMoneyPlaywrightClient {
 
     private synchronized void newContext() {
         Browser.NewContextOptions opts = new Browser.NewContextOptions()
-            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                + "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+            .setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36")
             .setViewportSize(1920, 1080)
             .setLocale("zh-CN")
             .setTimezoneId("Asia/Shanghai");
-        opts.setProxy("http://f278.kdltpspro.com:15818");
-        opts.setHttpCredentials("t18377527660878", "oyu11md5");
+        // 代理异常时临时禁用,直连验证
+        if (false) {
+            opts.setProxy("http://f278.kdltpspro.com:15818");
+            opts.setHttpCredentials("t18377527660878", "oyu11md5");
+        }
         if (browser == null) {
             initBrowser();
         }
         context = browser.newContext(opts);
+        // 关键:东财反爬识别 Referer + Cookie,必须带真实 Header
+        Map<String,String> headers = new HashMap<>();
+        headers.put("Referer", "https://quote.eastmoney.com/center/gridlist.html");
+        headers.put("Origin", "https://quote.eastmoney.com");
+        headers.put("Host", "push2.eastmoney.com");
+        headers.put("sec-fetch-dest", "script");
+        headers.put("sec-fetch-mode", "no-cors");
+        headers.put("sec-fetch-site", "same-site");
+        context.setExtraHTTPHeaders(headers);
+        // Cookie 自动管理:先访问主站种 Cookie,后续 API 请求自动带上
+        warmupForSite(context, "https://quote.eastmoney.com/center/gridlist.html");
+        log.info("[Playwright] 已注入反爬 Header(Referer/Origin/Sec-Fetch) + Cookie 预热完成");
         context.addInitScript(
             "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
             + "window.chrome = { runtime: {} };"
         );
         log.info("[Playwright] 浏览器上下文已创建/刷新 (with proxy)");
+    }
+
+    /**
+     * Cookie 预热:访问指定站点种 Session Cookie,后续 API 请求自动带上
+     * 金融站点每次响应都会刷新 Cookie,Playwright 自动更新 Cookie Jar
+     *
+     * @param siteUrl 要预热的主站 URL
+     */
+    public static void warmupForSite(BrowserContext ctx, String siteUrl) {
+        Page page = ctx.newPage();
+        try {
+            page.navigate(siteUrl, new Page.NavigateOptions().setTimeout(15000));
+            page.waitForLoadState(LoadState.DOMCONTENTLOADED);
+            log.info("[Playwright] Cookie 预热完成: {}", siteUrl);
+        } catch (Exception e) {
+            log.warn("[Playwright] Cookie 预热失败(不影响后续): {}", e.getMessage());
+        } finally {
+            page.close();
+        }
     }
 
     /**
