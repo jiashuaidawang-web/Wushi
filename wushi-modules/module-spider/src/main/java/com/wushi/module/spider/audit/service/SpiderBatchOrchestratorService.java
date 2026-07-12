@@ -32,6 +32,94 @@ public class SpiderBatchOrchestratorService {
         return round < BACKOFF_SECONDS.length ? BACKOFF_SECONDS[round] : BACKOFF_SECONDS[BACKOFF_SECONDS.length - 1];
     }
 
+    private static final List<String> THS_TASKS = List.of(
+            "ths_plate_dimension", "ths_plate_relation"
+    );
+
+    /** 跑 THS 全量(幂等 + 失败重试) */
+    public boolean runThsUntilComplete(LocalDate tradeDate) {
+        String auditId = auditService.generateAuditId();
+        LocalDateTime cutoffTime = tradeDate.plusDays(1).atTime(23, 59, 59);
+        LocalDateTime todayCutoff = LocalDate.now().atTime(23, 59, 59);
+        if (todayCutoff.isAfter(cutoffTime)) cutoffTime = todayCutoff;
+
+        Set<String> everSucceeded = new HashSet<>(findSucceededTasks(tradeDate));
+        log.info("===== THS跑批启动: tradeDate={}, everSucceeded={} =====", tradeDate, everSucceeded);
+
+        // 第一轮
+        for (String taskCode : THS_TASKS) {
+            if (everSucceeded.contains(taskCode)) {
+                log.info("  ↳ {} 已历史成功 → 跳过", taskCode);
+                continue;
+            }
+            runThsSingleTask(taskCode, tradeDate, auditId);
+        }
+
+        List<SpiderTaskCheckpointEntity> failed = auditService.findFailedTasks(tradeDate).stream()
+                .filter(t -> !everSucceeded.contains(t.getTaskCode()))
+                .toList();
+        if (failed.isEmpty()) {
+            log.info("✅ THS全部完成: tradeDate={}", tradeDate);
+            return true;
+        }
+
+        // 重试
+        for (int round = 0; round < BACKOFF_SECONDS.length; round++) {
+            if (LocalDateTime.now().isAfter(cutoffTime)) break;
+            int wait = getWaitSeconds(round);
+            if (LocalDateTime.now().plusSeconds(wait).isAfter(cutoffTime)) break;
+            log.info("===== 第{}轮重试: 等{}s, failed={} =====",
+                    round + 2, wait, failed.stream().map(SpiderTaskCheckpointEntity::getTaskCode).toList());
+            sleep(wait);
+            List<String> failedCodes = failed.stream().map(SpiderTaskCheckpointEntity::getTaskCode).distinct().toList();
+            for (String taskCode : failedCodes) {
+                runThsSingleTask(taskCode, tradeDate, auditId);
+            }
+            failed = auditService.findFailedTasks(tradeDate).stream()
+                    .filter(t -> !everSucceeded.contains(t.getTaskCode()))
+                    .toList();
+            if (failed.isEmpty()) {
+                log.info("✅ THS全部完成: tradeDate={}, 第{}轮成功", tradeDate, round + 2);
+                return true;
+            }
+        }
+
+        log.error("🚨 THS跑批失败: tradeDate={}, failed={}",
+                tradeDate, failed.stream().map(SpiderTaskCheckpointEntity::getTaskCode).toList());
+        return false;
+    }
+
+    private void runThsSingleTask(String taskCode, LocalDate tradeDate, String auditId) {
+        auditService.markRunning(taskCode, taskCode, tradeDate, "THS");
+        try {
+            int inserted = spiderJob.runThsByTaskCode(taskCode, tradeDate);
+            // ClickHouse 验证
+            String chTable = resolveThsTargetTable(taskCode);
+            int clickhouseCount = marketFactRepository.countByTradeDate(chTable, tradeDate);
+            if (clickhouseCount > 0) {
+                auditService.markSuccess(taskCode, tradeDate, "THS", clickhouseCount, 0);
+                auditService.logAudit(auditId, taskCode, tradeDate, "THS",
+                        chTable, "SUCCESS", clickhouseCount, clickhouseCount, 0, null);
+                log.info("  ↳ {} → SUCCESS (CH验证: {}行)", taskCode, clickhouseCount);
+            } else {
+                throw new RuntimeException("ClickHouse 无数据: table=" + chTable + ", tradeDate=" + tradeDate);
+            }
+        } catch (Exception e) {
+            auditService.markFailed(taskCode, tradeDate, "THS", e.getMessage());
+            auditService.logAudit(auditId, taskCode, tradeDate, "THS",
+                    resolveThsTargetTable(taskCode), "FAILED", 0, 0, 0, e.getMessage());
+            log.warn("  ↳ {} → FAILED: {}", taskCode, e.getMessage());
+        }
+    }
+
+    private String resolveThsTargetTable(String taskCode) {
+        return switch (taskCode) {
+            case "ths_plate_dimension", "ths_plates" -> "stock_plate_dimension";
+            case "ths_plate_relation", "ths_relations" -> "stock_plate_relation_snapshot";
+            default -> taskCode;
+        };
+    }
+
     public boolean runUntilComplete(LocalDate tradeDate) {
         String auditId = auditService.generateAuditId();
         // 截止时间:max(tradeDate+1天 23:59, 今天 23:59) — 跑历史数据也有足够时间重试

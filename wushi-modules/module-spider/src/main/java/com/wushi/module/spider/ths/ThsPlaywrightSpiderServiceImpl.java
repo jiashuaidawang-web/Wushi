@@ -7,6 +7,7 @@ import com.wushi.module.market.domain.row.StockPlateRelationSnapshotRow;
 import com.wushi.module.spider.common.SpiderHttpClient;
 import com.wushi.module.spider.eastmoney.KuaidailiProxyRefresher;
 import com.wushi.module.spider.eastmoney.EastMoneyPlaywrightClient;
+import com.wushi.module.spider.eastmoney.EastMoneyPlaywrightClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -95,8 +96,10 @@ public class ThsPlaywrightSpiderServiceImpl {
 
                 page.navigate(url, new Page.NavigateOptions().setTimeout(60000));
                 page.waitForLoadState(LoadState.NETWORKIDLE);
-                humanScroll(page);
-                humanDelay(500, 1500);
+                // P0:模拟人类阅读页面(滚动+停留+鼠标弧线)
+                humanReadPage(page);
+                // P1:随机大停顿(走神)
+                randomLongPause();
 
                 if (detectCaptcha(page)) {
                     log.warn("同花顺Playwright检测到验证码, attempt={}, url={}", attempt + 1, url);
@@ -153,7 +156,10 @@ public class ThsPlaywrightSpiderServiceImpl {
             String url = THS_HOME + "gn/";
             page.navigate(url, new Page.NavigateOptions().setTimeout(60000));
             page.waitForLoadState(LoadState.NETWORKIDLE);
-            humanScroll(page);
+            // P0:模拟人类阅读页面(滚动+停留+鼠标弧线)
+            humanReadPage(page);
+            // P1:随机大停顿(走神)
+            randomLongPause();
 
             if (detectCaptcha(page)) {
                 if (kuaidailiRefresher.isEnabled()) {
@@ -208,8 +214,10 @@ public class ThsPlaywrightSpiderServiceImpl {
             String url = THS_HOME + "code/" + plateCode + "/";
             page.navigate(url, new Page.NavigateOptions().setTimeout(60000));
             page.waitForLoadState(LoadState.NETWORKIDLE);
-            humanScroll(page);
-            humanDelay(500, 1500);
+            // P0:模拟人类阅读页面(滚动+停留+鼠标弧线)
+            humanReadPage(page);
+            // P1:随机大停顿(走神)
+            randomLongPause();
 
             if (detectCaptcha(page)) handleCaptcha(page);
 
@@ -255,7 +263,7 @@ public class ThsPlaywrightSpiderServiceImpl {
     private BrowserContext createContext(Browser browser) {
         String proxy = selectProxy();
         Browser.NewContextOptions options = new Browser.NewContextOptions()
-                .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+                .setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36")
                 .setViewportSize(1920, 1080)
                 .setLocale("zh-CN")
                 .setTimezoneId("Asia/Shanghai");
@@ -271,6 +279,8 @@ public class ThsPlaywrightSpiderServiceImpl {
             "Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });" +
             "Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });"
         );
+        // 请求 Header 强化(防指纹 + 反爬识别)
+        context.setExtraHTTPHeaders(buildThsHeaders());
         // Cookie 预热:先访问同花顺主站种 Session Cookie
         com.wushi.module.spider.eastmoney.EastMoneyPlaywrightClient.warmupForSite(
                 context, "https://stockpage.10jqka.com.cn/");
@@ -323,5 +333,59 @@ public class ThsPlaywrightSpiderServiceImpl {
 
     private void closeQuietly(AutoCloseable c) {
         if (c != null) { try { c.close(); } catch (Exception ignored) {} }
+    }
+
+    /**
+     * P0:鼠标弧线移动 — 模拟人类鼠标轨迹,降低机器检测
+     */
+    private void humanMouseMovement(Page page) {
+        int steps = ThreadLocalRandom.current().nextInt(3, 6);
+        for (int i = 0; i < steps; i++) {
+            int x = ThreadLocalRandom.current().nextInt(200, 1700);
+            int y = ThreadLocalRandom.current().nextInt(200, 800);
+            page.mouse().move(x, y, new Mouse.MoveOptions().setSteps(8));
+            humanDelay(100, 400);
+        }
+    }
+
+    /**
+     * P0:阅读停顿 — 模拟人类阅读页面
+     */
+    private void humanReadPage(Page page) {
+        // 随机阅读时间 2~5 秒
+//        humanDelay(ThreadLocalRandom.current().nextInt(2000, 5000));
+        humanDelay(2000, 5000);
+      // 滚动 + 停留
+        humanScroll(page);
+//        humanDelay(ThreadLocalRandom.current().nextInt(1000, 3000));
+       humanDelay(1000, 3000);
+      // 鼠标随机移动
+        humanMouseMovement(page);
+    }
+
+    /**
+     * P1:随机大停顿 — 打破频率规律,模拟"走神"
+     */
+    private void randomLongPause() {
+        if (ThreadLocalRandom.current().nextInt(10) == 0) {
+            log.info("[THS P1] 随机大停顿，模拟人类走神...");
+            humanDelay(10000, 20000);
+        }
+    }
+
+    /**
+     * 请求 Header 强化 — 模拟真实浏览器请求特征
+     */
+    private Map<String,String> buildThsHeaders() {
+        Map<String,String> headers = new HashMap<>();
+        headers.put("Referer", "https://stockpage.10jqka.com.cn/");
+        headers.put("Origin", "https://stockpage.10jqka.com.cn");
+        headers.put("sec-fetch-dest", "empty");
+        headers.put("sec-fetch-mode", "cors");
+        headers.put("sec-fetch-site", "same-origin");
+        headers.put("accept", "application/json, text/plain, */*");
+        headers.put("accept-encoding", "gzip, deflate, br, zstd");
+        headers.put("accept-language", "zh-CN,zh;q=0.9,en;q=0.8");
+        return headers;
     }
 }

@@ -208,6 +208,69 @@ public class SpiderController {
     }
 
     /**
+     * 同花顺完整跑批(幂等 + 失败重试)
+     * GET /api/spider/ths/daily/complete?tradeDate=2026-07-10
+     *
+     * 遇到 502 等瞬态错误会自动重试,每轮退避 2min → 5min → 10min → 30min
+     * 返回: {tradeDate, complete=true/false, elapsedMs}
+     */
+    @GetMapping("/ths/daily/complete")
+    public ApiResponse<Map<String, Object>> runThsDailyComplete(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate) {
+        LocalDate realTradeDate = tradeDate == null ? LocalDate.now() : tradeDate;
+        log.info("触发[THS完整版]跑批: tradeDate={}", realTradeDate);
+        long startMs = System.currentTimeMillis();
+        try {
+            boolean complete = batchOrchestratorService.runThsUntilComplete(realTradeDate);
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("tradeDate", realTradeDate.toString());
+            data.put("complete", complete);
+            data.put("elapsedMs", System.currentTimeMillis() - startMs);
+            if (!complete) {
+                data.put("detail", "达到最大重试次数后仍有失败,请查看审计日志");
+                data.put("failedTasks", auditService.findFailedTasks(realTradeDate).stream()
+                        .map(com.wushi.module.spider.audit.entity.SpiderTaskCheckpointEntity::getTaskCode)
+                        .distinct().toList());
+            }
+            return ApiResponse.success(data);
+        } catch (Exception e) {
+            log.error("THS完整版跑批失败: {}", e.getMessage(), e);
+            return ApiResponse.error("跑批异常: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 同花顺对账查询 API
+     * GET /api/spider/ths/daily/status?tradeDate=2026-07-10
+     */
+    @GetMapping("/ths/daily/status")
+    public ApiResponse<Map<String, Object>> checkThsStatus(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tradeDate) {
+        LocalDate realTradeDate = tradeDate == null ? LocalDate.now() : tradeDate;
+        log.info("触发THS对账查询: tradeDate={}", realTradeDate);
+        try {
+            List<com.wushi.module.spider.audit.entity.SpiderTaskCheckpointEntity> all =
+                    auditService.findAllTasks(realTradeDate);
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("tradeDate", realTradeDate.toString());
+            data.put("totalTasks", all.size());
+            data.put("allTasks", all.stream().map(t -> {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("taskCode", t.getTaskCode());
+                row.put("status", t.getStatus());
+                row.put("successCount", t.getSuccessCount());
+                row.put("failCount", t.getFailCount());
+                row.put("errorMessage", t.getErrorMessage());
+                return row;
+            }).toList());
+            return ApiResponse.success(data);
+        } catch (Exception e) {
+            log.error("THS对账查询失败: {}", e.getMessage(), e);
+            return ApiResponse.error("对账异常: " + e.getMessage());
+        }
+    }
+
+    /**
      * 通用响应封装
      */
     public record ApiResponse<T>(boolean success, String code, String message, T data) {

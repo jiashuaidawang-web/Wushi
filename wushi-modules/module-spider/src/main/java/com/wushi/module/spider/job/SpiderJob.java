@@ -576,4 +576,36 @@ public class SpiderJob {
             }
         };
     }
+
+    /**
+     * 按 task_code 跑单个 THS 任务 — 给 BatchOrchestratorService 用
+     */
+    public int runThsByTaskCode(String taskCode, LocalDate tradeDate) {
+        return switch (taskCode) {
+            case "ths_plate_dimension", "ths_plates" -> {
+                List<StockPlateDimensionRow> rows = thsSpiderService.fetchAllPlates(tradeDate);
+                if (rows == null || rows.isEmpty()) yield 0;
+                var writeResult = ingestionService.ingest(
+                        com.wushi.module.spider.core.SpiderResult.<StockPlateDimensionRow>builder()
+                                .taskCode(taskCode).provider("THS")
+                                .rows(rows).fetchedCount(rows.size()).successCount(rows.size())
+                                .status(com.wushi.module.spider.enums.SpiderTaskStatus.SUCCESS).build());
+                yield writeResult.getInsertedCount();
+            }
+            case "ths_plate_relation", "ths_relations" -> {
+                List<StockPlateRelationSnapshotRow> rows = thsSpiderService.fetchAllPlateRelations(tradeDate);
+                if (rows == null || rows.isEmpty()) yield 0;
+                var writeResult = ingestionService.ingest(
+                        com.wushi.module.spider.core.SpiderResult.<StockPlateRelationSnapshotRow>builder()
+                                .taskCode(taskCode).provider("THS")
+                                .rows(rows).fetchedCount(rows.size()).successCount(rows.size())
+                                .status(com.wushi.module.spider.enums.SpiderTaskStatus.SUCCESS).build());
+                yield writeResult.getInsertedCount();
+            }
+            default -> {
+                log.warn("未知 THS taskCode: {}", taskCode);
+                yield 0;
+            }
+        };
+    }
 }
