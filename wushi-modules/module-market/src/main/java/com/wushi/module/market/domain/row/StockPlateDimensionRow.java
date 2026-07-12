@@ -14,11 +14,11 @@ public record StockPlateDimensionRow(String plateCode, String plateName, String 
 
     @Override
     public List<String> columns() {
-        return List.of("plate_code", "plate_name", "plate_type", "parent_plate_code", "status", "source");
+        return List.of("plate_code", "plate_name", "plate_type", "parent_plate_code", "status", "source", "updated_at");
     }
 
     @Override
     public Object[] values() {
-        return new Object[]{plateCode, plateName, plateType, parentPlateCode, status, source};
+        return new Object[]{plateCode, plateName, plateType, parentPlateCode, status, source, java.time.LocalDateTime.now()};
     }
 }

@@ -38,4 +38,15 @@ public enum FactTable {
     public boolean hasTradeDate() {
         return tradeDateColumn != null;
     }
+
+    /**
+     * [ClickHouse fix] 返回去除 "wushi." 前缀的裸表名。
+     * <p>
+     * ClickHouse HTTP-JDBC 默认以 JDBC URL 末尾的 database（或通过 ?database=）为当前 database，
+     * 库名出现在表名位置会被整体当作表名的一部分解析失败，
+     * 故 Repository 层应一律使用 {@link #bareTableName()} 拼接 SQL。
+     */
+    public String bareTableName() {
+        return tableName.replaceFirst("^wushi\\.", "");
+    }
 }

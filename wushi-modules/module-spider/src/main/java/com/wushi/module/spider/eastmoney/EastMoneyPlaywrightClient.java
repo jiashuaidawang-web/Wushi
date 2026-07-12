@@ -10,12 +10,26 @@ import jakarta.annotation.PreDestroy;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
+/**
+ * 东财 Playwright 浏览器客户端
+ * 通过隧道代理 + Playwright 模拟浏览器抓取东财公开接口
+ *
+ * <p>容错设计:
+ * <ul>
+ *   <li>每页最多重试 {@link #MAX_PAGE_RETRIES} 次, 采用指数退避 (1s, 2s, 4s, 8s...)</li>
+ *   <li>遇到 ERR_EMPTY_RESPONSE / TargetClosedError 等浏览器崩溃时, 自动重建浏览器上下文</li>
+ *   <li>每 {@link #CONTEXT_REFRESH_INTERVAL} 页强制刷新上下文, 防止代理 IP 过载</li>
+ * </ul>
+ *
+ * <p><b>线程安全</b>: 本组件是 Spring 单例 Bean, 所有浏览器操作方法使用 {@code synchronized} 保证串行访问。
+ */
 @Slf4j
 @Component
 public class EastMoneyPlaywrightClient {
 
-    private static final int MAX_PAGE_RETRIES = 3;
-    private static final int RETRY_BASE_DELAY_MS = 2000;
+    private static final int MAX_PAGE_RETRIES = 4;
+    private static final long RETRY_BASE_DELAY_MS = 1000L;
+    private static final int CONTEXT_REFRESH_INTERVAL = 20;
     private static final int PAGE_DELAY_MIN_MS = 200;
     private static final int PAGE_DELAY_MAX_MS = 500;
 
@@ -29,9 +43,16 @@ public class EastMoneyPlaywrightClient {
         initBrowser();
     }
 
-    private void initBrowser() {
+    // ========== 浏览器生命周期 ==========
+
+    private synchronized void initBrowser() {
         try {
-            this.playwright = Playwright.create();
+            if (playwright == null) {
+                this.playwright = Playwright.create();
+            }
+            if (browser != null) {
+                try { browser.close(); } catch (Exception ignored) {}
+            }
             this.browser = playwright.chromium().launch(
                 new BrowserType.LaunchOptions()
                     .setHeadless(true)
@@ -40,7 +61,9 @@ public class EastMoneyPlaywrightClient {
                         "--disable-dev-shm-usage",
                         "--no-sandbox",
                         "--disable-gpu",
-                        "--window-size=1920,1080"
+                        "--window-size=1920,1080",
+                        "--disable-extensions",
+                        "--disable-background-networking"
                     ))
             );
             log.info("[Playwright] Chromium 启动成功");
@@ -57,55 +80,73 @@ public class EastMoneyPlaywrightClient {
         return context;
     }
 
-    private void newContext() {
+    private synchronized void newContext() {
         Browser.NewContextOptions opts = new Browser.NewContextOptions()
-            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                + "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
             .setViewportSize(1920, 1080)
             .setLocale("zh-CN")
             .setTimezoneId("Asia/Shanghai");
         opts.setProxy("http://f278.kdltpspro.com:15818");
         opts.setHttpCredentials("t18377527660878", "oyu11md5");
+        if (browser == null) {
+            initBrowser();
+        }
         context = browser.newContext(opts);
         context.addInitScript(
-            "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });" +
-            "window.chrome = { runtime: {} };"
+            "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
+            + "window.chrome = { runtime: {} };"
         );
         log.info("[Playwright] 浏览器上下文已创建/刷新 (with proxy)");
     }
 
-    private void refreshSession() {
-        if (context != null) {
-            try { context.close(); } catch (Exception ignored) {}
-            context = null;
-        }
+    /**
+     * 浏览器崩溃恢复: 关闭并重建整个浏览器进程 + 上下文
+     */
+    private synchronized void recoverBrowser() {
+        log.warn("[Playwright] 浏览器崩溃, 执行恢复: 关闭并重建");
+        try { if (context != null) context.close(); } catch (Exception ignored) {}
+        context = null;
+        try { if (browser != null) browser.close(); } catch (Exception ignored) {}
+        browser = null;
+        initBrowser();
         newContext();
+    }
+
+    /**
+     * 指数退避延时: 第 n 次重试等待 BASE * 2^(n-1) 毫秒
+     * <p>第1次重试: 1s, 第2次: 2s, 第3次: 4s, 第4次: 8s ...
+     */
+    private static long backoffDelayMs(int retryCount) {
+        return RETRY_BASE_DELAY_MS * (1L << (retryCount - 1));
     }
 
     // ========== 分页抓取 ==========
 
-    /**
-     * 抓取全市场股票日K (ALL_STOCK)
-     */
     public int fetchAllStocks(List<JsonNode> outRows) throws Exception {
         return fetchAllPages(EastMoneyEndpoint.ALL_STOCK, outRows, "stock_daily_kline");
     }
 
     /**
-     * 通用分页抓取 - 支持任意 EastMoney endpoint
-     * 返回实际抓取到的行数（不是 API 声明的 total）
+     * 通用分页抓取
+     *
+     * @return 实际抓取到的行数
      */
-    public int fetchAllPages(EastMoneyEndpoint endpoint, List<JsonNode> outRows, String taskName) throws Exception {
+    public int fetchAllPages(EastMoneyEndpoint endpoint, List<JsonNode> outRows, String taskName)
+            throws Exception {
         String template = endpoint.getUrlTemplate();
-        int apiTotal = 0;
         int totalPage = 1;
-        int fetchedRows = 0;
 
         for (int page = 1; page <= totalPage; page++) {
-            String url = String.format(template, page, System.currentTimeMillis());
-            url = url.replaceAll("[?&]cb=[^&]*", "");
-            url = url.replaceAll("\\?&", "?").replaceAll("&&", "&").replaceAll("[?&]$", "");
+            // 定期刷新上下文, 防止代理 IP 过载被封
+            if (page > 1 && page % CONTEXT_REFRESH_INTERVAL == 0) {
+                log.info("[{}] page {}, 定期刷新上下文(防代理过载)", taskName, page);
+                refreshSession();
+            }
 
+            String url = buildUrl(template, page);
             int attempt = 0;
+
             while (true) {
                 attempt++;
                 try {
@@ -116,7 +157,7 @@ public class EastMoneyPlaywrightClient {
                         log.warn("[{}] page {} data=null (attempt={})", taskName, page, attempt);
                         if (attempt < MAX_PAGE_RETRIES) {
                             refreshSession();
-                            sleep(RETRY_BASE_DELAY_MS * attempt);
+                            sleep(backoffDelayMs(attempt));
                             continue;
                         }
                         log.error("[{}] page {} data=null 超过最大重试次数,跳过", taskName, page);
@@ -124,43 +165,48 @@ public class EastMoneyPlaywrightClient {
                     }
 
                     JsonNode data = root.get("data");
-                    apiTotal = data.path("total").asInt(0);
+                    int apiTotal = data.path("total").asInt(0);
                     totalPage = Math.max(1, (int) Math.ceil(apiTotal / (double) 100));
 
                     if (data.path("diff").isArray()) {
                         int pageSize = data.path("diff").size();
                         data.path("diff").forEach(outRows::add);
-                        fetchedRows += pageSize;
-                        log.info("[{}] page {}/{}, rows={}, total={}, fetched={}", taskName, page, totalPage, pageSize, apiTotal, outRows.size());
-                    } else {
-                        log.info("[{}] page {}/{}, no diff array", taskName, page, totalPage);
+                        log.info("[{}] page {}/{}, rows={}, fetched={}",
+                            taskName, page, totalPage, pageSize, outRows.size());
                     }
 
                     randomDelay(PAGE_DELAY_MIN_MS, PAGE_DELAY_MAX_MS);
                     break;
 
                 } catch (Exception e) {
-                    log.warn("[{}] page {} attempt={} 失败: {}", taskName, page, attempt, e.getMessage());
+                    boolean isCrash = isBrowserCrash(e);
+                    log.warn("[{}] page {} attempt={} 失败: {}{}",
+                        taskName, page, attempt, e.getMessage(), isCrash ? " [浏览器崩溃]" : "");
+
                     if (attempt < MAX_PAGE_RETRIES) {
-                        refreshSession();
-                        sleep(RETRY_BASE_DELAY_MS * attempt);
+                        if (isCrash) {
+                            recoverBrowser();
+                        } else {
+                            refreshSession();
+                        }
+                        sleep(backoffDelayMs(attempt));
                         continue;
                     }
-                    log.error("[{}] page {} 超过最大重试次数,终止: {}", taskName, page, e.getMessage());
-                    if (page == 1) throw e;
-                    return fetchedRows;
+                    log.error("[{}] page {} 超过最大重试次数({}次),终止", taskName, page, MAX_PAGE_RETRIES);
+                    if (page == 1) {
+                        throw new RuntimeException("第1页连续" + MAX_PAGE_RETRIES + "次抓取失败, 终止任务", e);
+                    }
+                    return outRows.size();
                 }
             }
         }
-        return fetchedRows;
+        return outRows.size();
     }
 
     // ========== 非分页抓取 (Pool) ==========
 
-    /**
-     * 抓取股票池 (非分页 endpoint)
-     */
-    public int fetchPool(EastMoneyEndpoint endpoint, List<JsonNode> outRows, String taskName, Object... extraArgs) throws Exception {
+    public int fetchPool(EastMoneyEndpoint endpoint, List<JsonNode> outRows, String taskName,
+                         Object... extraArgs) throws Exception {
         String template = endpoint.getUrlTemplate();
         Object[] args = new Object[extraArgs.length + 1];
         System.arraycopy(extraArgs, 0, args, 0, extraArgs.length);
@@ -184,10 +230,11 @@ public class EastMoneyPlaywrightClient {
                 log.info("[{}] pool rows={}", taskName, size);
                 return size;
             } catch (Exception e) {
+                boolean isCrash = isBrowserCrash(e);
                 log.warn("[{}] pool attempt={} 失败: {}", taskName, attempt, e.getMessage());
                 if (attempt < MAX_PAGE_RETRIES) {
-                    refreshSession();
-                    sleep(RETRY_BASE_DELAY_MS * attempt);
+                    if (isCrash) { recoverBrowser(); } else { refreshSession(); }
+                    sleep(backoffDelayMs(attempt));
                     continue;
                 }
                 log.error("[{}] pool 超过最大重试次数", taskName);
@@ -198,53 +245,68 @@ public class EastMoneyPlaywrightClient {
 
     // ========== 底层请求 ==========
 
+    /**
+     * 抓取单个页面并返回 JSON 文本
+     *
+     * <p>使用 navigate 同步返回 Response, 立即读取 body 后再 close page,
+     * 避免 finally 与回调竞争导致 TargetClosedError.
+     */
     private String fetchPageJson(String url) {
         BrowserContext ctx = getOrCreateContext();
         Page page = ctx.newPage();
-        int attempt = 0;
-        while (true) {
-            attempt++;
-            try {
-                Response response = page.navigate(url, new Page.NavigateOptions().setTimeout(30000));
-                if (response == null) {
-                    throw new RuntimeException("attempt=" + attempt + " response is null");
-                }
-                String text = response.text();
-                if (text == null || text.isBlank()) {
-                    throw new RuntimeException("attempt=" + attempt + " response body is empty");
-                }
-
-                // 去掉 JSONP: jQuery123( ... )
-                text = text.trim();
-                int p0 = text.indexOf('(');
-                int p1 = text.lastIndexOf(')');
-                if (p0 >= 0 && p1 > p0) text = text.substring(p0 + 1, p1);
-                return text.trim();
-            } catch (Exception e) {
-                log.warn("[fetchPageJson] attempt={} 失败: {}", attempt, e.getMessage());
-                if (attempt < MAX_PAGE_RETRIES) {
-                    refreshSession();
-                    ctx = getOrCreateContext();
-                    page = ctx.newPage();
-                    sleep(RETRY_BASE_DELAY_MS * attempt);
-                    continue;
-                }
-                throw e;
-            } finally {
-                try { page.close(); } catch (Exception ignored) {}
+        try {
+            Response response = page.navigate(url, new Page.NavigateOptions().setTimeout(30000));
+            if (response == null) {
+                throw new RuntimeException("response is null");
             }
+            String text = response.text();
+            if (text == null || text.isBlank()) {
+                throw new RuntimeException("response body is empty");
+            }
+            // 去掉 JSONP 包装: jQuery123( ... ) -> ...
+            text = text.trim();
+            int p0 = text.indexOf('(');
+            int p1 = text.lastIndexOf(')');
+            if (p0 >= 0 && p1 > p0) {
+                text = text.substring(p0 + 1, p1);
+            }
+            return text.trim();
+        } finally {
+            try { page.close(); } catch (Exception ignored) {}
         }
+    }
+
+    // ========== 工具方法 ==========
+
+    private String buildUrl(String template, int page) {
+        String url = String.format(template, page, System.currentTimeMillis());
+        url = url.replaceAll("[?&]cb=[^&]*", "");
+        url = url.replaceAll("\\?&", "?").replaceAll("&&", "&").replaceAll("[?&]$", "");
+        return url;
+    }
+
+    private boolean isBrowserCrash(Exception e) {
+        if (e.getMessage() == null) return false;
+        String msg = e.getMessage();
+        return msg.contains("has been closed")
+            || msg.contains("Target closed")
+            || msg.contains("Browser closed")
+            || msg.contains("Session closed");
+    }
+
+    private void refreshSession() {
+        if (context != null) {
+            try { context.close(); } catch (Exception ignored) {}
+            context = null;
+        }
+        newContext();
     }
 
     private void randomDelay(int minMs, int maxMs) {
-        try {
-            Thread.sleep(ThreadLocalRandom.current().nextInt(minMs, maxMs));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        sleep(ThreadLocalRandom.current().nextInt(minMs, maxMs));
     }
 
-    private void sleep(long millis) {
+    private static void sleep(long millis) {
         try {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
@@ -254,6 +316,9 @@ public class EastMoneyPlaywrightClient {
 
     @PreDestroy
     public void shutdown() {
+        if (context != null) {
+            try { context.close(); } catch (Exception ignored) {}
+        }
         if (browser != null) {
             try { browser.close(); } catch (Exception ignored) {}
         }

@@ -19,12 +19,12 @@ public record HighPositionFeedbackDailyRow(LocalDate tradeDate, String stockCode
     @Override
     public List<String> columns() {
         return List.of("trade_date", "stock_code", "stock_name", "position_level", "feedback_type",
-                "change_pct", "drawdown_pct", "impact_score", "related_plate_codes");
+                "change_pct", "drawdown_pct", "impact_score", "related_plate_codes", "source");
     }
 
     @Override
     public Object[] values() {
         return new Object[]{tradeDate, stockCode, stockName, positionLevel, feedbackType, changePct,
-                drawdownPct, impactScore, relatedPlateCodes};
+                drawdownPct, impactScore, relatedPlateCodes, "MARKET_DATA"};
     }
 }

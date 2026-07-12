@@ -18,13 +18,13 @@ public record StockPlateRelationSnapshotRow(LocalDate tradeDate, String stockCod
 
     @Override
     public List<String> columns() {
-        return List.of("trade_date", "stock_code", "stock_name", "plate_code", "plate_name", "plate_type",
-                "relation_source", "relation_confidence", "is_current_backfill", "source");
+        // [ClickHouse fix] 对齐 DDL (10 列,无 created_at)
+        return List.of("trade_date", "plate_code", "plate_name", "plate_type", "stock_code", "stock_name",
+                "weight", "is_leader", "leader_rank", "source");
     }
 
     @Override
     public Object[] values() {
-        return new Object[]{tradeDate, stockCode, stockName, plateCode, plateName, plateType,
-                relationSource, relationConfidence, isCurrentBackfill, source};
+        return new Object[]{tradeDate, plateCode, plateName, plateType, stockCode, stockName, null, null, null, source};
     }
 }

@@ -19,12 +19,12 @@ public record StockLimitIntradayEventRow(LocalDate tradeDate, LocalDateTime even
 
     @Override
     public List<String> columns() {
-        return List.of("trade_date", "event_time", "stock_code", "stock_name", "event_type", "price",
-                "seal_amount", "event_sequence", "source");
+        return List.of("trade_date", "stock_code", "stock_name", "event_type", "event_time", "event_price",
+                "event_amount", "interval_seconds", "source");
     }
 
     @Override
     public Object[] values() {
-        return new Object[]{tradeDate, eventTime, stockCode, stockName, eventType, price, sealAmount, eventSequence, source};
+        return new Object[]{tradeDate, stockCode, stockName, eventType, eventTime, price, sealAmount, null, source};
     }
 }

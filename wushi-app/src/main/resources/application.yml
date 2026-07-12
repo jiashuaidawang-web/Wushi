@@ -1,5 +1,5 @@
 server:
-  port: ${SERVER_PORT:8081} # 支持动态修改容器端口，默认 8080
+  port: ${SERVER_PORT:8080} # 支持动态修改容器端口，默认 8080
 
 spring:
   application:
@@ -12,6 +12,7 @@ spring:
       password: ${DB_PASSWORD:astock_root} # 冒号后面是你当前的默认密码
       driver-class-name: com.mysql.cj.jdbc.Driver
     clickhouse:
+      # [ClickHouse fix] 显式声明 database，避免库名没出现在 USE 上下文；与 MarketFactRepositoryImpl 去掉 wushi. 前缀配套
       jdbc-url: jdbc:clickhouse://${CK_HOST:124.223.220.245}:${CK_PORT:8123}/wushi
       username: ${CK_USER:default}
       password: ${CK_PASSWORD:pamirs@123}

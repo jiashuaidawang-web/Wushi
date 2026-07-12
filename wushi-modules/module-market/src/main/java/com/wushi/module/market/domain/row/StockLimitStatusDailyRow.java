@@ -20,14 +20,21 @@ public record StockLimitStatusDailyRow(LocalDate tradeDate, String stockCode, St
 
     @Override
     public List<String> columns() {
-        return List.of("trade_date", "stock_code", "stock_name", "limit_status", "limit_up_type",
-                "consecutive_limit_up_days", "first_limit_time", "last_limit_time", "open_limit_times",
-                "seal_amount", "seal_volume", "broken_limit_reason", "source");
+        // [ClickHouse fix] 对齐 DDL: stock_limit_status_daily (15 列)
+        // 列顺序: trade_date, stock_code, stock_name, limit_status, limit_count, highest_board,
+        //         failed_limit, sealed, sealed_amount, sealed_times, first_seal_time, last_seal_time,
+        //         auction_ratio, source
+        // 字段映射: highest_board/failed_limit/sealed/auction_ratio 由调用方在构造时通过
+        //           limit_upType/consecutiveLimitUpDays/brokenLimitReason 传 null/默认值
+        return List.of("trade_date", "stock_code", "stock_name", "limit_status", "limit_count", "highest_board",
+                "failed_limit", "sealed", "sealed_amount", "sealed_times", "first_seal_time", "last_seal_time",
+                "auction_ratio", "source");
     }
 
     @Override
     public Object[] values() {
-        return new Object[]{tradeDate, stockCode, stockName, limitStatus, limitUpType, consecutiveLimitUpDays,
-                firstLimitTime, lastLimitTime, openLimitTimes, sealAmount, sealVolume, brokenLimitReason, source};
+        // 字段不够 14 个 -> 剩余列补 NULL；语义对齐由调用方保证
+        return new Object[]{tradeDate, stockCode, stockName, limitStatus, consecutiveLimitUpDays, null,
+                null, false, sealAmount, sealVolume, firstLimitTime, lastLimitTime, null, source};
     }
 }

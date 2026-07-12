@@ -31,7 +31,12 @@ public class DataSourceConfig {
 
     private HikariDataSource buildHikariDataSource(Environment env, String prefix, String poolName) {
         HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(env.getProperty(prefix + "jdbc-url"));
+        String jdbcUrl = env.getProperty(prefix + "jdbc-url");
+        // [ClickHouse fix] 显式声明批处理重写 & socketTimeout，避免默认值失效
+        if (prefix.contains("clickhouse")) {
+            jdbcUrl = jdbcUrl + (jdbcUrl.contains("?") ? "&" : "?") + "rewriteBatchMultiValues=true&socketTimeout=300000";
+        }
+        config.setJdbcUrl(jdbcUrl);
         config.setUsername(env.getProperty(prefix + "username"));
         config.setPassword(env.getProperty(prefix + "password"));
         config.setDriverClassName(env.getProperty(prefix + "driver-class-name"));
@@ -42,12 +47,12 @@ public class DataSourceConfig {
 
     @Bean
     @Primary
-    public JdbcTemplate jdbcTemplate(DataSource mysqlDataSource) {
+    public JdbcTemplate jdbcTemplate(@Qualifier("mysqlDataSource") DataSource mysqlDataSource) {
         return new JdbcTemplate(mysqlDataSource);
     }
 
     @Bean
-    public JdbcTemplate clickHouseJdbcTemplate(DataSource clickHouseDataSource) {
+    public JdbcTemplate clickHouseJdbcTemplate(@Qualifier("clickHouseDataSource") DataSource clickHouseDataSource) {
         return new JdbcTemplate(clickHouseDataSource);
     }
 

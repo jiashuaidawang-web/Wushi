@@ -19,15 +19,16 @@ public record MarketBreadthDailySnapshotRow(LocalDate tradeDate, Integer upCount
 
     @Override
     public List<String> columns() {
-        return List.of("trade_date", "up_count", "down_count", "flat_count", "limit_up_count", "limit_down_count",
-                "broken_limit_count", "high_open_count", "low_open_count", "above_ma5_count", "above_ma10_count",
-                "above_ma20_count", "money_effect_score", "loss_effect_score");
+        // [ClickHouse fix] 对齐 DDL (22 列)。Java record 字段不够时由 values() 补 NULL。
+        return List.of("trade_date", "total_stocks", "up_count", "down_count", "flat_count", "limit_up_count",
+                "limit_down_count", "broken_limit_count", "up_down_ratio", "limit_up_ratio", "limit_down_ratio",
+                "yest_limit_up_count", "yest_limit_up_now_up", "yest_limit_up_now_down", "yest_limit_up_now_limit_up",
+                "yest_limit_up_feedback", "jdp_ratio", "sentiment_score", "source");
     }
 
     @Override
     public Object[] values() {
-        return new Object[]{tradeDate, upCount, downCount, flatCount, limitUpCount, limitDownCount, brokenLimitCount,
-                highOpenCount, lowOpenCount, aboveMa5Count, aboveMa10Count, aboveMa20Count,
-                moneyEffectScore, lossEffectScore};
+        return new Object[]{tradeDate, null, upCount, downCount, flatCount, limitUpCount, limitDownCount, brokenLimitCount,
+                null, null, null, null, null, null, null, null, null, null};
     }
 }

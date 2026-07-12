@@ -1,31 +1,163 @@
+# ============================================================
+# 悟势 Wushi — 完全独立 Docker 部署
+# 不依赖宿主机已有的任何 MySQL/ClickHouse/Selenium 容器
+# 宿主机端口已做偏移, 避免与现有服务冲突
+#
+# 用法:
+#   docker compose up -d          # 启动
+#   docker compose logs -f backend  # 看后端日志
+#   docker compose down -v        # 停服 + 清理数据卷
+# ============================================================
 version: "3.8"
 
 services:
+  # ----------------------------------------------------------------
+  # 1. MySQL 8.0 — 业务数据库 (规则/经验/审核)
+  # ----------------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: wushi-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: astock_root
+      MYSQL_DATABASE: wushi
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+08:00
+      - --sql-mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "h", "localhost", "-uroot", "-pastock_root"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - wushi_net
+
+  # ----------------------------------------------------------------
+  # 2. ClickHouse 23.8 — 列式分析库 (行情/K线/快照)
+  # ----------------------------------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    container_name: wushi-clickhouse
+    environment:
+      CLICKHOUSE_DB: wushi
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: pamirs@123
+      TZ: Asia/Shanghai
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_log:/var/log/clickhouse-server
+      - ./docker/clickhouse-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "8124:8123"
+      - "9001:9000"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - wushi_net
+
+  # ----------------------------------------------------------------
+  # 3. Selenium Chrome — 浏览器自动化 (THS 同花顺抓取)
+  # ----------------------------------------------------------------
+  selenium-chrome:
+    image: selenium/standalone-chrome:127.0
+    container_name: wushi-selenium
+    environment:
+      START_XVFB: "false"
+      SE_NODE_OVERRIDE_MAX_SESSIONS: "true"
+      SE_NODE_MAX_SESSIONS: "8"
+      SE_SESSION_REQUEST_TIMEOUT: "300"
+    volumes:
+      - /dev/shm:/dev/shm
+    ports:
+      - "4445:4444"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4444/wd/hub/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - wushi_net
+
+  # ----------------------------------------------------------------
+  # 4. Spring Boot Backend — 后端主服务 (数据抓取 + 跑批 + API)
+  # ----------------------------------------------------------------
   backend:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: wushi-backend
     environment:
-      SPRING_DATASOURCE_MYSQL_JDBC_URL: "jdbc:mysql://astock-mysql:3306/wushi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
-      SPRING_DATASOURCE_MYSQL_USERNAME: root
-      SPRING_DATASOURCE_MYSQL_PASSWORD: astock_root
-      SPRING_DATASOURCE_CLICKHOUSE_JDBC_URL: "jdbc:clickhouse://astock-clickhouse:8123/wushi"
-      SPRING_DATASOURCE_CLICKHOUSE_USERNAME: default
-      SPRING_DATASOURCE_CLICKHOUSE_PASSWORD: pamirs@123
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      SERVER_PORT: 8080
       TZ: Asia/Shanghai
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: astock_root
+      CK_HOST: clickhouse
+      CK_PORT: 8123
+      CK_USER: default
+      CK_PASSWORD: pamirs%40123
+      SELENIUM_HOST: selenium-chrome
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: /usr/bin/google-chrome-stable
     ports:
-      - "8080:8080"
-    networks:
-      - astock-emotion-system_default
+      - "8081:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      selenium-chrome:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
     restart: unless-stopped
-    shm_size: 2gb
     deploy:
       resources:
         limits:
-          memory: 3G
+          memory: 4G
+    networks:
+      - wushi_net
 
+# ----------------------------------------------------------------
+# 持久化卷
+# ----------------------------------------------------------------
+volumes:
+  mysql_data:
+    driver: local
+  clickhouse_data:
+    driver: local
+  clickhouse_log:
+    driver: local
+
+# ----------------------------------------------------------------
+# 内部网络
+# ----------------------------------------------------------------
 networks:
-  astock-emotion-system_default:
-    external: true
+  wushi_net:
+    driver: bridge
+    name: wushi_net

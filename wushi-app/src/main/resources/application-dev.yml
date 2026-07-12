@@ -5,6 +5,7 @@ spring:
       username: root
       password: astock_root
     clickhouse:
+      # [ClickHouse fix] 显式 database=/wushi，与 Repository 去除库名前缀保持一致
       jdbc-url: jdbc:clickhouse://124.223.220.245:8123/wushi
       username: default
       password: pamirs@123
