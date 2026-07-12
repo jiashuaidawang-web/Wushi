@@ -87,11 +87,7 @@ public class EastMoneyPlaywrightClient {
             .setViewportSize(1920, 1080)
             .setLocale("zh-CN")
             .setTimezoneId("Asia/Shanghai");
-        // 代理异常时临时禁用,直连验证
-        if (false) {
-            opts.setProxy("http://f278.kdltpspro.com:15818");
-            opts.setHttpCredentials("t18377527660878", "oyu11md5");
-        }
+        // 快代理已过期,改为本机直连
         if (browser == null) {
             initBrowser();
         }

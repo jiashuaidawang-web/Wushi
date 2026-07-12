@@ -113,14 +113,14 @@ public class SpiderAuditService {
     }
 
     /**
-     * 写审计日志
+     * 写审计日志 — 每次独立生成 audit_id,避免 UK 冲突
      */
-    public void logAudit(String auditId, String taskCode, LocalDate tradeDate, String provider,
+    public void logAudit(String taskCode, LocalDate tradeDate, String provider,
                          String targetTable, String syncStatus,
                          int fetchedCount, int insertedCount, int failedCount,
                          String errorMessage) {
         DataSyncAuditLogEntity entity = new DataSyncAuditLogEntity();
-        entity.setAuditId(auditId);
+        entity.setAuditId("audit_" + UUID.randomUUID().toString().replace("-", ""));
         entity.setTaskCode(taskCode);
         entity.setTradeDate(tradeDate);
         entity.setProvider(provider);
