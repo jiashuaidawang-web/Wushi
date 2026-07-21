@@ -7,13 +7,13 @@ spring:
   datasource:
     mysql:
       # 用 ${变量名:默认值} 的形式，默认连你的公网IP，但允许通过Docker环境变量动态覆盖为Tailscale内网IP
-      jdbc-url: jdbc:mysql://${DB_HOST:100.97.74.45}:${DB_PORT:3306}/wushi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      jdbc-url: jdbc:mysql://${DB_HOST:124.223.220.245}:${DB_PORT:3306}/wushi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       username: ${DB_USER:root}
       password: ${DB_PASSWORD:astock_root} # 冒号后面是你当前的默认密码
       driver-class-name: com.mysql.cj.jdbc.Driver
     clickhouse:
       # [ClickHouse fix] 显式声明 database，避免库名没出现在 USE 上下文；与 MarketFactRepositoryImpl 去掉 wushi. 前缀配套
-      jdbc-url: jdbc:clickhouse://${CK_HOST:100.97.74.45}:${CK_PORT:8123}/wushi
+      jdbc-url: jdbc:clickhouse://${CK_HOST:124.223.220.245}:${CK_PORT:8123}/wushi
       username: ${CK_USER:default}
       password: ${CK_PASSWORD:pamirs@123}
       driver-class-name: com.clickhouse.jdbc.ClickHouseDriver
