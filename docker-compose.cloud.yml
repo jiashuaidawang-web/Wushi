@@ -1,0 +1,94 @@
+# ============================================================
+# 悟势 Wushi — 对接云服务器 MySQL + ClickHouse 的 Docker 部署
+#
+# 依赖:
+#   - MySQL   云服务器 (aipe_metadata 库已初始化)
+#   - ClickHouse 云服务器 (metric_observation 库已初始化)
+#
+# 使用前请修改下方 environment 里的 DB_HOST / CK_HOST 为云服务器内网 IP
+#
+# 用法:
+#   mvn clean package -DskipTests
+#   docker-compose up -d
+#   docker-compose logs -f backend
+#   docker-compose down
+# ============================================================
+version: "3.8"
+
+services:
+  # ----------------------------------------------------------------
+  # 1. Selenium Chrome — 浏览器自动化 (THS 同花顺抓取)
+  # ----------------------------------------------------------------
+  selenium-chrome:
+    image: selenium/standalone-chrome:127.0
+    container_name: wushi-selenium
+    environment:
+      START_XVFB: "false"
+      SE_NODE_OVERRIDE_MAX_SESSIONS: "true"
+      SE_NODE_MAX_SESSIONS: "8"
+      SE_SESSION_REQUEST_TIMEOUT: "300"
+    volumes:
+      - /dev/shm:/dev/shm
+    ports:
+      - "4445:4444"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4444/wd/hub/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - wushi_net
+
+  # ----------------------------------------------------------------
+  # 2. Spring Boot Backend — 后端主服务
+  #    对接云服务器的 MySQL + ClickHouse
+  # ----------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wushi-backend
+    environment:
+      SERVER_PORT: 8080
+      TZ: Asia/Shanghai
+      # =====================================================
+      # TODO: 修改为你的云服务器内网 IP
+      # =====================================================
+      DB_HOST: ${MYSQL_HOST:-100.97.74.45}
+      DB_PORT: ${MYSQL_PORT:-3306}
+      DB_USER: ${MYSQL_USER:-root}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-astock_root}
+      CK_HOST: ${CLICKHOUSE_HOST:-100.97.74.45}
+      CK_PORT: ${CLICKHOUSE_PORT:-8123}
+      CK_USER: ${CLICKHOUSE_USER:-default}
+      CK_PASSWORD: ${CLICKHOUSE_PASSWORD:-pamirs%40123}
+      # =====================================================
+      SELENIUM_HOST: selenium-chrome
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: /usr/bin/google-chrome-stable
+      JAVA_OPTS: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+    ports:
+      - "8081:8080"
+    depends_on:
+      selenium-chrome:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    networks:
+      - wushi_net
+
+networks:
+  wushi_net:
+    driver: bridge
+    name: wushi_net
